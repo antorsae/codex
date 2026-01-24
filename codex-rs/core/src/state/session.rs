@@ -26,6 +26,7 @@ pub(crate) struct SessionState {
     pub(crate) initial_context_seeded: bool,
     /// Previous rollout model for one-shot model-switch handling on first turn after resume.
     pub(crate) pending_resume_previous_model: Option<String>,
+    pub(crate) next_mcp_tool_selection: Option<Vec<String>>,
 }
 
 impl SessionState {
@@ -41,6 +42,7 @@ impl SessionState {
             mcp_dependency_prompted: HashSet::new(),
             initial_context_seeded: false,
             pending_resume_previous_model: None,
+            next_mcp_tool_selection: None,
         }
     }
 
@@ -127,6 +129,14 @@ impl SessionState {
 
     pub(crate) fn dependency_env(&self) -> HashMap<String, String> {
         self.dependency_env.clone()
+    }
+
+    pub(crate) fn set_next_mcp_tool_selection(&mut self, tool_names: Vec<String>) {
+        self.next_mcp_tool_selection = Some(tool_names);
+    }
+
+    pub(crate) fn take_next_mcp_tool_selection(&mut self) -> Option<Vec<String>> {
+        self.next_mcp_tool_selection.take()
     }
 }
 

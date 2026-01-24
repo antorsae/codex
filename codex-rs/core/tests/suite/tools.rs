@@ -281,7 +281,10 @@ async fn sandbox_denied_shell_returns_original_output() -> Result<()> {
     Ok(())
 }
 
-async fn collect_tools(use_unified_exec: bool) -> Result<Vec<String>> {
+async fn collect_tools_with_config<F>(update: F) -> Result<Vec<String>>
+where
+    F: FnOnce(&mut codex_core::config::Config) + Send + 'static,
+{
     let server = start_mock_server().await;
 
     let responses = vec![sse(vec![
@@ -291,13 +294,7 @@ async fn collect_tools(use_unified_exec: bool) -> Result<Vec<String>> {
     ])];
     let mock = mount_sse_sequence(&server, responses).await;
 
-    let mut builder = test_codex().with_config(move |config| {
-        if use_unified_exec {
-            config.features.enable(Feature::UnifiedExec);
-        } else {
-            config.features.disable(Feature::UnifiedExec);
-        }
-    });
+    let mut builder = test_codex().with_config(update);
     let test = builder.build(&server).await?;
 
     test.submit_turn_with_policies(
@@ -309,6 +306,17 @@ async fn collect_tools(use_unified_exec: bool) -> Result<Vec<String>> {
 
     let first_body = mock.single_request().body_json();
     Ok(tool_names(&first_body))
+}
+
+async fn collect_tools(use_unified_exec: bool) -> Result<Vec<String>> {
+    collect_tools_with_config(move |config| {
+        if use_unified_exec {
+            config.features.enable(Feature::UnifiedExec);
+        } else {
+            config.features.disable(Feature::UnifiedExec);
+        }
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

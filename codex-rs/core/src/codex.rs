@@ -485,6 +485,9 @@ pub(crate) struct Session {
     next_internal_sub_id: AtomicU64,
 }
 
+const SEARCH_TOOL_DEVELOPER_INSTRUCTIONS: &str =
+    include_str!("../templates/search_tool/developer_instructions.md");
+
 /// The context needed for a single turn of the thread.
 #[derive(Debug)]
 pub(crate) struct TurnContext {
@@ -1156,6 +1159,16 @@ impl Session {
         BaseInstructions {
             text: state.session_configuration.base_instructions.clone(),
         }
+    }
+
+    pub(crate) async fn set_next_mcp_tool_selection(&self, tool_names: Vec<String>) {
+        let mut state = self.state.lock().await;
+        state.set_next_mcp_tool_selection(tool_names);
+    }
+
+    pub(crate) async fn take_next_mcp_tool_selection(&self) -> Option<Vec<String>> {
+        let mut state = self.state.lock().await;
+        state.take_next_mcp_tool_selection()
     }
 
     async fn record_initial_history(&self, conversation_history: InitialHistory) {
@@ -2056,7 +2069,7 @@ impl Session {
         &self,
         turn_context: &TurnContext,
     ) -> Vec<ResponseItem> {
-        let mut items = Vec::<ResponseItem>::with_capacity(4);
+        let mut items = Vec::<ResponseItem>::with_capacity(6);
         let shell = self.user_shell();
         items.push(
             DeveloperInstructions::from_policy(
@@ -2070,6 +2083,11 @@ impl Session {
         );
         if let Some(developer_instructions) = turn_context.developer_instructions.as_deref() {
             items.push(DeveloperInstructions::new(developer_instructions.to_string()).into());
+        }
+        if turn_context.tools_config.search_tool {
+            items.push(
+                DeveloperInstructions::new(SEARCH_TOOL_DEVELOPER_INSTRUCTIONS.to_string()).into(),
+            );
         }
         // Add developer instructions from collaboration_mode if they exist and are non-empty
         let (collaboration_mode, base_instructions) = {
@@ -3926,6 +3944,15 @@ fn filter_codex_apps_mcp_tools(
     mcp_tools
 }
 
+fn filter_mcp_tools_by_name(
+    mut mcp_tools: HashMap<String, crate::mcp_connection_manager::ToolInfo>,
+    selected_tools: &[String],
+) -> HashMap<String, crate::mcp_connection_manager::ToolInfo> {
+    let allowed: HashSet<&str> = selected_tools.iter().map(String::as_str).collect();
+    mcp_tools.retain(|name, _| allowed.contains(name.as_str()));
+    mcp_tools
+}
+
 fn codex_apps_connector_id(tool: &crate::mcp_connection_manager::ToolInfo) -> Option<&str> {
     tool.connector_id.as_deref()
 }
@@ -3962,19 +3989,28 @@ async fn run_sampling_request(
         .list_all_tools()
         .or_cancel(&cancellation_token)
         .await?;
-    let connectors_for_tools = if turn_context.config.features.enabled(Feature::Apps) {
-        let connectors = connectors::accessible_connectors_from_mcp_tools(&mcp_tools);
-        Some(filter_connectors_for_input(
-            connectors,
-            &input,
-            tool_selection.explicit_app_paths,
-            tool_selection.skill_name_counts_lower,
-        ))
+    let search_tool_enabled = turn_context.config.features.enabled(Feature::SearchTool);
+    if search_tool_enabled {
+        if let Some(selected_tools) = sess.take_next_mcp_tool_selection().await {
+            mcp_tools = filter_mcp_tools_by_name(mcp_tools, &selected_tools);
+        } else {
+            mcp_tools.clear();
+        }
     } else {
-        None
-    };
-    if let Some(connectors) = connectors_for_tools.as_ref() {
-        mcp_tools = filter_codex_apps_mcp_tools(mcp_tools, connectors);
+        let connectors_for_tools = if turn_context.config.features.enabled(Feature::Apps) {
+            let connectors = connectors::accessible_connectors_from_mcp_tools(&mcp_tools);
+            Some(filter_connectors_for_input(
+                connectors,
+                &input,
+                tool_selection.explicit_app_paths,
+                tool_selection.skill_name_counts_lower,
+            ))
+        } else {
+            None
+        };
+        if let Some(connectors) = connectors_for_tools.as_ref() {
+            mcp_tools = filter_codex_apps_mcp_tools(mcp_tools, connectors);
+        }
     }
     let router = Arc::new(ToolRouter::from_config(
         &turn_context.tools_config,
