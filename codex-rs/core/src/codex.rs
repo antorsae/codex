@@ -4847,8 +4847,11 @@ mod tests {
     use crate::config::ConfigBuilder;
     use crate::config::test_config;
     use crate::exec::ExecToolCallOutput;
+    use crate::features::Feature;
     use crate::function_tool::FunctionCallError;
+    use crate::models_manager::model_info::apply_js_repl_polling_section;
     use crate::models_manager::model_info::apply_js_repl_section;
+    use crate::models_manager::model_info::apply_js_repl_tools_only_section;
     use crate::shell::default_user_shell;
     use crate::tools::format_exec_output_str;
 
@@ -4969,9 +4972,13 @@ mod tests {
 
         let (session, _turn_context) = make_session_and_context().await;
         let config = test_config();
-        let prompt_with_apply_patch_instructions = apply_js_repl_section(
-            prompt_with_apply_patch_instructions,
-            config.features.enabled(Feature::JsRepl),
+        let js_repl_enabled = config.features.enabled(Feature::JsRepl);
+        let prompt_with_apply_patch_instructions = apply_js_repl_tools_only_section(
+            &apply_js_repl_polling_section(
+                &apply_js_repl_section(prompt_with_apply_patch_instructions, js_repl_enabled),
+                js_repl_enabled && config.features.enabled(Feature::JsReplPolling),
+            ),
+            js_repl_enabled && config.features.enabled(Feature::JsReplToolsOnly),
         );
 
         for test_case in test_cases {
