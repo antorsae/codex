@@ -16,6 +16,10 @@ Within this context, Codex refers to the open-source agentic coding interface (n
 - `codex.sh` requires a string command and resolves to `{ stdout, stderr, exitCode }`; `codex.tool` executes a normal tool call and resolves to the raw tool output object.
 - Top-level bindings persist across cells. If you hit `SyntaxError: Identifier 'x' has already been declared`, reuse the binding, pick a new name, wrap in `{ ... }` for block scope, or reset the kernel with `js_repl_reset`.
 - Top-level static import declarations (for example `import x from "pkg"`) are currently unsupported in `js_repl`; use dynamic imports with `await import("pkg")` instead.
+<!-- js_repl_tools_only:start -->
+- Do not call tools directly; use `js_repl` + `codex.tool(...)`, and use `codex.sh(...)` for shell commands instead of direct shell tool calls.
+- Tools available via `codex.tool(...)`: {{JS_REPL_TOOL_LIST}}. MCP tools (if any) can also be called by name.
+<!-- js_repl_tools_only:end -->
 - Avoid direct access to `process.stdout` / `process.stderr` / `process.stdin`; it can corrupt the JSON line protocol. Use `console.log`, `codex.sh`, and `codex.emitImage`.
 <!-- js_repl:end -->
 
