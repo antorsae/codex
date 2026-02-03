@@ -1289,8 +1289,8 @@ async fn submit_user_message_with_mode_sets_coding_collaboration_mode() {
 }
 
 #[tokio::test]
-async fn submit_user_message_with_mode_queues_while_plan_stream_is_active() {
-    let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
+async fn submit_user_message_with_mode_errors_while_turn_is_running() {
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
     chat.thread_id = Some(ThreadId::new());
     chat.set_feature_enabled(Feature::CollaborationModes, true);
     let plan_mask =
@@ -1298,38 +1298,23 @@ async fn submit_user_message_with_mode_queues_while_plan_stream_is_active() {
             .expect("expected plan collaboration mask");
     chat.set_collaboration_mask(plan_mask);
     chat.on_task_started();
-    chat.on_plan_delta("- Step 1".to_string());
 
     let code_mode = collaboration_modes::code_mask(chat.models_manager.as_ref())
         .expect("expected code collaboration mode");
     chat.submit_user_message_with_mode("Implement the plan.".to_string(), code_mode);
 
     assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Plan);
-    assert_eq!(chat.queued_user_messages.len(), 1);
-    assert_eq!(
-        chat.queued_user_messages.front().unwrap().text,
-        "Implement the plan."
-    );
-    assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
-
-    chat.on_task_complete(None, false);
-
     assert!(chat.queued_user_messages.is_empty());
-    assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Code);
-    match next_submit_op(&mut op_rx) {
-        Op::UserTurn {
-            collaboration_mode:
-                Some(CollaborationMode {
-                    mode: ModeKind::Code,
-                    ..
-                }),
-            personality: None,
-            ..
-        } => {}
-        other => {
-            panic!("expected Op::UserTurn with code collab mode, got {other:?}")
-        }
-    }
+    assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
+    let rendered = drain_insert_history(&mut rx)
+        .iter()
+        .map(|lines| lines_to_single_string(lines))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        rendered.contains("Cannot submit a mode-switched message while a turn is running."),
+        "expected running-turn error message, got: {rendered:?}"
+    );
 }
 
 #[tokio::test]
@@ -1341,7 +1326,6 @@ async fn submit_user_message_with_mode_submits_when_plan_stream_is_not_active() 
         collaboration_modes::mask_for_kind(chat.models_manager.as_ref(), ModeKind::Plan)
             .expect("expected plan collaboration mask");
     chat.set_collaboration_mask(plan_mask);
-    chat.on_task_started();
 
     let code_mode = collaboration_modes::code_mask(chat.models_manager.as_ref())
         .expect("expected code collaboration mode");

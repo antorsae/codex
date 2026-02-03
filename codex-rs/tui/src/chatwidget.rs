@@ -5889,6 +5889,13 @@ impl ChatWidget {
         text: String,
         collaboration_mode: CollaborationModeMask,
     ) {
+        if self.agent_turn_running {
+            self.add_error_message(
+                "Cannot submit a mode-switched message while a turn is running.".to_string(),
+            );
+            return;
+        }
+
         let should_queue = self.is_plan_streaming_in_tui();
         let user_message = UserMessage {
             text,
