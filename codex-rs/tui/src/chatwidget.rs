@@ -2714,8 +2714,8 @@ impl ChatWidget {
                         text_elements,
                         mention_paths: self.bottom_pane.take_mention_paths(),
                     };
-                    if self.is_session_configured() {
-                        // Submitted is only emitted when steer is enabled (Enter sends immediately).
+                    if self.is_session_configured() && !self.is_plan_generation_in_progress() {
+                        // Submitted is only emitted when steer is enabled.
                         // Reset any reasoning header only when we are actually submitting a turn.
                         self.reasoning_buffer.clear();
                         self.full_reasoning_buffer.clear();
@@ -5860,6 +5860,10 @@ impl ChatWidget {
         self.bottom_pane.is_task_running() || self.is_review_mode
     }
 
+    fn is_plan_generation_in_progress(&self) -> bool {
+        self.agent_turn_running && self.active_mode_kind() == ModeKind::Plan
+    }
+
     pub(crate) fn composer_is_empty(&self) -> bool {
         self.bottom_pane.composer_is_empty()
     }
@@ -5869,8 +5873,13 @@ impl ChatWidget {
         text: String,
         collaboration_mode: CollaborationModeMask,
     ) {
+        let should_queue = self.is_plan_generation_in_progress();
         self.set_collaboration_mask(collaboration_mode);
-        self.submit_user_message(text.into());
+        if should_queue {
+            self.queue_user_message(text.into());
+        } else {
+            self.submit_user_message(text.into());
+        }
     }
 
     /// True when the UI is in the regular composer state with no running task,
