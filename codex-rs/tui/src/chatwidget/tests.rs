@@ -472,8 +472,8 @@ async fn interrupted_turn_restore_preserves_mode_override_for_resubmission() {
 
     let plan_mask = collaboration_modes::plan_mask(chat.models_manager.as_ref())
         .expect("expected plan collaboration mode");
-    let code_mask = collaboration_modes::code_mask(chat.models_manager.as_ref())
-        .expect("expected code collaboration mode");
+    let code_mask = collaboration_modes::default_mask(chat.models_manager.as_ref())
+        .expect("expected default collaboration mode");
     let expected_mode = code_mask
         .mode
         .expect("expected mode kind on code collaboration mode");
