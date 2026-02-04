@@ -497,10 +497,7 @@ async fn interrupted_turn_restore_preserves_mode_override_for_resubmission() {
     });
 
     assert_eq!(chat.bottom_pane.composer_text(), "Implement the plan.");
-    assert_eq!(
-        chat.composer_collaboration_mode_override,
-        Some(code_mask.clone())
-    );
+    assert_eq!(chat.composer_collaboration_mode_override, Some(code_mask));
     assert!(chat.queued_user_messages.is_empty());
     assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Plan);
 
