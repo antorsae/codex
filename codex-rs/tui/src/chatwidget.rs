@@ -1455,6 +1455,8 @@ impl ChatWidget {
         let mut combined_offset = 0usize;
         let mut next_image_label = 1usize;
         let mut combined_collaboration_mode_override = None;
+        // The restored composer can carry only one override. If merged drafts disagree on mode,
+        // we drop the override instead of arbitrarily picking one.
         let mut has_conflicting_mode_overrides = false;
 
         for (idx, message) in to_merge.into_iter().enumerate() {
@@ -1463,6 +1465,7 @@ impl ChatWidget {
                 combined_offset += 1;
             }
             let message = remap_placeholders_for_message(message, &mut next_image_label);
+            // Preserve an override only when every merged draft points to the same mode.
             if let Some(mask) = &message.collaboration_mode_override {
                 if let Some(existing) = &combined_collaboration_mode_override
                     && existing != mask
