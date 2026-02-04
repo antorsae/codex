@@ -497,9 +497,8 @@ async fn interrupted_turn_restore_preserves_mode_override_for_resubmission() {
     });
 
     assert_eq!(chat.bottom_pane.composer_text(), "Implement the plan.");
-    assert_eq!(chat.composer_collaboration_mode_override, Some(code_mask));
     assert!(chat.queued_user_messages.is_empty());
-    assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Plan);
+    assert_eq!(chat.active_collaboration_mode_kind(), expected_mode);
 
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
@@ -932,7 +931,6 @@ async fn make_chatwidget_manual(
         frame_requester: FrameRequester::test_dummy(),
         show_welcome_banner: true,
         queued_user_messages: VecDeque::new(),
-        composer_collaboration_mode_override: None,
         suppress_session_configured_redraw: false,
         pending_notification: None,
         quit_shortcut_expires_at: None,
