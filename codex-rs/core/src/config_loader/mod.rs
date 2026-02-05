@@ -76,7 +76,7 @@ const DEFAULT_PROJECT_ROOT_MARKERS: &[&str] = &[".git"];
 /// - cloud:    managed cloud requirements
 /// - admin:    managed preferences (*)
 /// - system    `/etc/codex/requirements.toml` (Unix) or
-///             `%ProgramData%\OpenAI\Codex\requirements.toml` (Windows)
+///   `%ProgramData%\OpenAI\Codex\requirements.toml` (Windows)
 ///
 /// For backwards compatibility, we also load from
 /// `managed_config.toml` and map it to `requirements.toml`.
@@ -382,14 +382,14 @@ async fn load_requirements_toml(
 fn system_requirements_toml_file() -> Option<PathBuf> {
     #[cfg(unix)]
     {
-        return Some(PathBuf::from("/etc/codex/requirements.toml"));
+        Some(PathBuf::from("/etc/codex/requirements.toml"))
     }
 
     #[cfg(windows)]
     {
-        return Some(windows_system_requirements_toml_file(
+        Some(windows_system_requirements_toml_file(
             std::env::var_os("ProgramData").as_deref(),
-        ));
+        ))
     }
 
     #[cfg(not(any(unix, windows)))]
