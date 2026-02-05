@@ -238,12 +238,56 @@ fn build_user_message_lines_with_elements(
 }
 
 fn inline_data_url_summary(url: &str) -> String {
-    let prefix = url
-        .trim_start_matches("data:")
-        .split_once(',')
-        .map_or_else(|| "image".to_string(), |(meta, _)| meta.to_string());
-    let media_type = prefix.split(';').next().unwrap_or("image");
-    format!("{media_type} data URL ({len} bytes)", len = url.len())
+    let Some(data_url_body) = url.strip_prefix("data:") else {
+        return "image data URL (size unavailable)".to_string();
+    };
+    let Some((meta, payload)) = data_url_body.split_once(',') else {
+        return "image data URL (size unavailable)".to_string();
+    };
+    let media_type = meta
+        .split(';')
+        .next()
+        .filter(|media_type| !media_type.is_empty())
+        .unwrap_or("image");
+    let Some(payload_bytes) = data_url_payload_size_bytes(meta, payload) else {
+        return format!("{media_type} data URL (size unavailable)");
+    };
+    format!("{media_type} data URL ({payload_bytes} bytes)")
+}
+
+fn data_url_payload_size_bytes(meta: &str, payload: &str) -> Option<usize> {
+    if meta
+        .split(';')
+        .any(|part| part.eq_ignore_ascii_case("base64"))
+    {
+        return base64::engine::general_purpose::STANDARD
+            .decode(payload)
+            .ok()
+            .map(|decoded| decoded.len());
+    }
+    percent_decoded_len(payload)
+}
+
+fn percent_decoded_len(payload: &str) -> Option<usize> {
+    let bytes = payload.as_bytes();
+    let mut idx = 0usize;
+    let mut decoded_len = 0usize;
+    while idx < bytes.len() {
+        if bytes[idx] == b'%' {
+            if idx + 2 >= bytes.len() {
+                return None;
+            }
+            if !bytes[idx + 1].is_ascii_hexdigit() || !bytes[idx + 2].is_ascii_hexdigit() {
+                return None;
+            }
+            decoded_len = decoded_len.saturating_add(1);
+            idx = idx.saturating_add(3);
+        } else {
+            decoded_len = decoded_len.saturating_add(1);
+            idx = idx.saturating_add(1);
+        }
+    }
+    Some(decoded_len)
 }
 
 fn remote_image_display_label(index: usize, total: usize) -> String {
@@ -3411,13 +3455,13 @@ mod tests {
             message: "describe inline image".to_string(),
             text_elements: Vec::new(),
             local_image_paths: Vec::new(),
-            remote_image_urls: vec!["data:image/png;base64,abc123".to_string()],
+            remote_image_urls: vec!["data:image/png;base64,aGVsbG8=".to_string()],
         };
 
         let rendered = render_lines(&cell.display_lines(80)).join("\n");
 
         assert!(rendered.contains("[external image]"));
-        assert!(rendered.contains("image/png data URL"));
+        assert!(rendered.contains("image/png data URL (5 bytes)"));
         assert!(rendered.contains("describe inline image"));
     }
 
