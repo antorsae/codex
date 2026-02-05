@@ -1161,14 +1161,19 @@ impl Session {
         }
     }
 
-    pub(crate) async fn set_next_mcp_tool_selection(&self, tool_names: Vec<String>) {
+    pub(crate) async fn merge_mcp_tool_selection(&self, tool_names: Vec<String>) -> Vec<String> {
         let mut state = self.state.lock().await;
-        state.set_next_mcp_tool_selection(tool_names);
+        state.merge_mcp_tool_selection(tool_names)
     }
 
-    pub(crate) async fn take_next_mcp_tool_selection(&self) -> Option<Vec<String>> {
+    pub(crate) async fn get_mcp_tool_selection(&self) -> Option<Vec<String>> {
+        let state = self.state.lock().await;
+        state.get_mcp_tool_selection()
+    }
+
+    pub(crate) async fn clear_mcp_tool_selection(&self) {
         let mut state = self.state.lock().await;
-        state.take_next_mcp_tool_selection()
+        state.clear_mcp_tool_selection();
     }
 
     async fn record_initial_history(&self, conversation_history: InitialHistory) {
@@ -3944,6 +3949,28 @@ fn filter_codex_apps_mcp_tools(
     mcp_tools
 }
 
+fn filter_codex_apps_mcp_tools_only(
+    mut mcp_tools: HashMap<String, crate::mcp_connection_manager::ToolInfo>,
+    connectors: &[connectors::AppInfo],
+) -> HashMap<String, crate::mcp_connection_manager::ToolInfo> {
+    let allowed: HashSet<&str> = connectors
+        .iter()
+        .map(|connector| connector.id.as_str())
+        .collect();
+
+    mcp_tools.retain(|_, tool| {
+        if tool.server_name != CODEX_APPS_MCP_SERVER_NAME {
+            return false;
+        }
+        let Some(connector_id) = codex_apps_connector_id(tool) else {
+            return false;
+        };
+        allowed.contains(connector_id)
+    });
+
+    mcp_tools
+}
+
 fn filter_mcp_tools_by_name(
     mut mcp_tools: HashMap<String, crate::mcp_connection_manager::ToolInfo>,
     selected_tools: &[String],
@@ -3989,29 +4016,39 @@ async fn run_sampling_request(
         .list_all_tools()
         .or_cancel(&cancellation_token)
         .await?;
+
     let search_tool_enabled = turn_context.config.features.enabled(Feature::SearchTool);
-    if search_tool_enabled {
-        if let Some(selected_tools) = sess.take_next_mcp_tool_selection().await {
-            mcp_tools = filter_mcp_tools_by_name(mcp_tools, &selected_tools);
-        } else {
-            mcp_tools.clear();
-        }
+    let apps_enabled = turn_context.config.features.enabled(Feature::Apps);
+
+    let apps_connectors = if apps_enabled {
+        Some(filter_connectors_for_input(
+            connectors::accessible_connectors_from_mcp_tools(&mcp_tools),
+            &input,
+            tool_selection.explicit_app_paths,
+            tool_selection.skill_name_counts_lower,
+        ))
     } else {
-        let connectors_for_tools = if turn_context.config.features.enabled(Feature::Apps) {
-            let connectors = connectors::accessible_connectors_from_mcp_tools(&mcp_tools);
-            Some(filter_connectors_for_input(
-                connectors,
-                &input,
-                tool_selection.explicit_app_paths,
-                tool_selection.skill_name_counts_lower,
-            ))
-        } else {
-            None
-        };
-        if let Some(connectors) = connectors_for_tools.as_ref() {
-            mcp_tools = filter_codex_apps_mcp_tools(mcp_tools, connectors);
+        None
+    };
+
+    if search_tool_enabled {
+        let mut selected_mcp_tools =
+            if let Some(selected_tools) = sess.get_mcp_tool_selection().await {
+                filter_mcp_tools_by_name(mcp_tools.clone(), &selected_tools)
+            } else {
+                HashMap::new()
+            };
+
+        if let Some(connectors) = apps_connectors.as_ref() {
+            let apps_mcp_tools = filter_codex_apps_mcp_tools_only(mcp_tools, connectors);
+            selected_mcp_tools.extend(apps_mcp_tools);
         }
+
+        mcp_tools = selected_mcp_tools;
+    } else if let Some(connectors) = apps_connectors.as_ref() {
+        mcp_tools = filter_codex_apps_mcp_tools(mcp_tools, connectors);
     }
+
     let router = Arc::new(ToolRouter::from_config(
         &turn_context.tools_config,
         Some(
@@ -4841,6 +4878,8 @@ pub(super) fn get_last_assistant_message_from_turn(responses: &[ResponseItem]) -
 pub(crate) use tests::make_session_and_context;
 #[cfg(test)]
 pub(crate) use tests::make_session_and_context_with_rx;
+#[cfg(test)]
+pub(crate) use tests::make_session_configuration_for_tests;
 
 #[cfg(test)]
 mod tests {
@@ -4850,6 +4889,7 @@ mod tests {
     use crate::config::test_config;
     use crate::exec::ExecToolCallOutput;
     use crate::function_tool::FunctionCallError;
+    use crate::mcp_connection_manager::ToolInfo;
     use crate::shell::default_user_shell;
     use crate::tools::format_exec_output_str;
 
@@ -4889,6 +4929,8 @@ mod tests {
 
     use codex_protocol::mcp::CallToolResult as McpCallToolResult;
     use pretty_assertions::assert_eq;
+    use rmcp::model::JsonObject;
+    use rmcp::model::Tool;
     use serde::Deserialize;
     use serde_json::json;
     use std::path::PathBuf;
@@ -4922,6 +4964,30 @@ mod tests {
             distribution_channel: None,
             install_url: None,
             is_accessible: true,
+        }
+    }
+
+    fn make_mcp_tool(
+        server_name: &str,
+        tool_name: &str,
+        connector_id: Option<&str>,
+        connector_name: Option<&str>,
+    ) -> ToolInfo {
+        ToolInfo {
+            server_name: server_name.to_string(),
+            tool_name: tool_name.to_string(),
+            tool: Tool {
+                name: tool_name.to_string().into(),
+                title: None,
+                description: Some(format!("Test tool: {tool_name}").into()),
+                input_schema: Arc::new(JsonObject::default()),
+                output_schema: None,
+                annotations: None,
+                icons: None,
+                meta: None,
+            },
+            connector_id: connector_id.map(str::to_string),
+            connector_name: connector_name.map(str::to_string),
         }
     }
 
@@ -5026,6 +5092,93 @@ mod tests {
         );
 
         assert_eq!(selected, Vec::new());
+    }
+
+    #[test]
+    fn search_tool_selection_keeps_codex_apps_tools_without_mentions() {
+        let selected_tool_names = vec![
+            "mcp__codex_apps__calendar_create_event".to_string(),
+            "mcp__rmcp__echo".to_string(),
+        ];
+        let mcp_tools = HashMap::from([
+            (
+                "mcp__codex_apps__calendar_create_event".to_string(),
+                make_mcp_tool(
+                    CODEX_APPS_MCP_SERVER_NAME,
+                    "calendar_create_event",
+                    Some("calendar"),
+                    Some("Calendar"),
+                ),
+            ),
+            (
+                "mcp__rmcp__echo".to_string(),
+                make_mcp_tool("rmcp", "echo", None, None),
+            ),
+        ]);
+
+        let mut selected_mcp_tools =
+            filter_mcp_tools_by_name(mcp_tools.clone(), &selected_tool_names);
+        let connectors = connectors::accessible_connectors_from_mcp_tools(&mcp_tools);
+        let connectors = filter_connectors_for_input(
+            connectors,
+            &[user_message("run the selected tools")],
+            &[],
+            &HashMap::new(),
+        );
+        let apps_mcp_tools = filter_codex_apps_mcp_tools_only(mcp_tools, &connectors);
+        selected_mcp_tools.extend(apps_mcp_tools);
+
+        let mut tool_names: Vec<String> = selected_mcp_tools.into_keys().collect();
+        tool_names.sort();
+        assert_eq!(
+            tool_names,
+            vec![
+                "mcp__codex_apps__calendar_create_event".to_string(),
+                "mcp__rmcp__echo".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn apps_mentions_add_codex_apps_tools_to_search_selected_set() {
+        let selected_tool_names = vec!["mcp__rmcp__echo".to_string()];
+        let mcp_tools = HashMap::from([
+            (
+                "mcp__codex_apps__calendar_create_event".to_string(),
+                make_mcp_tool(
+                    CODEX_APPS_MCP_SERVER_NAME,
+                    "calendar_create_event",
+                    Some("calendar"),
+                    Some("Calendar"),
+                ),
+            ),
+            (
+                "mcp__rmcp__echo".to_string(),
+                make_mcp_tool("rmcp", "echo", None, None),
+            ),
+        ]);
+
+        let mut selected_mcp_tools =
+            filter_mcp_tools_by_name(mcp_tools.clone(), &selected_tool_names);
+        let connectors = connectors::accessible_connectors_from_mcp_tools(&mcp_tools);
+        let connectors = filter_connectors_for_input(
+            connectors,
+            &[user_message("use $calendar and then echo the response")],
+            &[],
+            &HashMap::new(),
+        );
+        let apps_mcp_tools = filter_codex_apps_mcp_tools_only(mcp_tools, &connectors);
+        selected_mcp_tools.extend(apps_mcp_tools);
+
+        let mut tool_names: Vec<String> = selected_mcp_tools.into_keys().collect();
+        tool_names.sort();
+        assert_eq!(
+            tool_names,
+            vec![
+                "mcp__codex_apps__calendar_create_event".to_string(),
+                "mcp__rmcp__echo".to_string(),
+            ]
+        );
     }
 
     #[tokio::test]
@@ -5693,6 +5846,46 @@ mod tests {
             "test".to_string(),
             session_source,
         )
+    }
+
+    pub(crate) async fn make_session_configuration_for_tests() -> SessionConfiguration {
+        let codex_home = tempfile::tempdir().expect("create temp dir");
+        let config = build_test_config(codex_home.path()).await;
+        let config = Arc::new(config);
+        let model = ModelsManager::get_model_offline(config.model.as_deref());
+        let model_info = ModelsManager::construct_model_info_offline(model.as_str(), &config);
+        let reasoning_effort = config.model_reasoning_effort;
+        let collaboration_mode = CollaborationMode {
+            mode: ModeKind::Default,
+            settings: Settings {
+                model,
+                reasoning_effort,
+                developer_instructions: None,
+            },
+        };
+
+        SessionConfiguration {
+            provider: config.model_provider.clone(),
+            collaboration_mode,
+            model_reasoning_summary: config.model_reasoning_summary,
+            developer_instructions: config.developer_instructions.clone(),
+            user_instructions: config.user_instructions.clone(),
+            personality: config.personality,
+            base_instructions: config
+                .base_instructions
+                .clone()
+                .unwrap_or_else(|| model_info.get_model_instructions(config.personality)),
+            compact_prompt: config.compact_prompt.clone(),
+            approval_policy: config.approval_policy.clone(),
+            sandbox_policy: config.sandbox_policy.clone(),
+            windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
+            cwd: config.cwd.clone(),
+            codex_home: config.codex_home.clone(),
+            thread_name: None,
+            original_config_do_not_use: Arc::clone(&config),
+            session_source: SessionSource::Exec,
+            dynamic_tools: Vec::new(),
+        }
     }
 
     pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {

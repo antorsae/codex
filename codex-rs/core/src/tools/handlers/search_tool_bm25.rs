@@ -115,11 +115,11 @@ impl ToolHandler for SearchToolBm25Handler {
         entries.sort_by(|a, b| a.name.cmp(&b.name));
 
         if entries.is_empty() {
-            session.set_next_mcp_tool_selection(Vec::new()).await;
+            let active_selected_tools = session.get_mcp_tool_selection().await.unwrap_or_default();
             let content = json!({
                 "query": query,
                 "total_tools": 0,
-                "selected_tools": [],
+                "active_selected_tools": active_selected_tools,
                 "tools": [],
             })
             .to_string();
@@ -157,14 +157,12 @@ impl ToolHandler for SearchToolBm25Handler {
             }));
         }
 
-        session
-            .set_next_mcp_tool_selection(selected_tools.clone())
-            .await;
+        let active_selected_tools = session.merge_mcp_tool_selection(selected_tools).await;
 
         let content = json!({
             "query": query,
             "total_tools": entries.len(),
-            "selected_tools": selected_tools,
+            "active_selected_tools": active_selected_tools,
             "tools": result_payloads,
         })
         .to_string();

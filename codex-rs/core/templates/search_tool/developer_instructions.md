@@ -8,8 +8,9 @@ Follow this workflow:
    - `query` (required): focused terms that describe the capability you need.
    - `limit` (optional): maximum number of tools to return (default `8`, max `50`).
 2. Use the returned `tools` list to decide which MCP tools are relevant.
-3. On the next request, only the returned `selected_tools` will be available. Invoke the MCP tool(s) you need there.
-4. MCP tool selections are consumed after that next request. Search again if you need different MCP tools.
+3. Matching tools are added to `active_selected_tools`. Only tools in `active_selected_tools` are available for the remainder of the current turn.
+4. Repeated searches in the same turn are additive: new matches are unioned into `active_selected_tools`.
+5. `active_selected_tools` resets at the start of the next turn.
 
 Notes:
 - Core tools remain available without searching.
