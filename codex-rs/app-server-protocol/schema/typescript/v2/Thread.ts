@@ -11,6 +11,13 @@ export type Thread = { id: string,
  */
 preview: string, 
 /**
+ * Tri-state image-context signal for the conversation:
+ * - `Some(true)`: image input is known to exist in conversation context
+ * - `Some(false)`: known to be text-only
+ * - `None`: unknown / not yet determined
+ */
+hasImageContext: boolean | null, 
+/**
  * Model provider used for this thread (for example, 'openai').
  */
 modelProvider: string, 

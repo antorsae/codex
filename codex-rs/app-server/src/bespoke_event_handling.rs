@@ -1,4 +1,5 @@
 use crate::codex_message_processor::ApiVersion;
+use crate::codex_message_processor::ImageContextStore;
 use crate::codex_message_processor::PendingInterrupts;
 use crate::codex_message_processor::PendingRollbacks;
 use crate::codex_message_processor::TurnSummary;
@@ -112,6 +113,7 @@ pub(crate) async fn apply_bespoke_event_handling(
     pending_interrupts: PendingInterrupts,
     pending_rollbacks: PendingRollbacks,
     turn_summary_store: TurnSummaryStore,
+    image_context_store: ImageContextStore,
     api_version: ApiVersion,
     fallback_model_provider: String,
 ) {
@@ -830,6 +832,10 @@ pub(crate) async fn apply_bespoke_event_handling(
                 .await;
         }
         EventMsg::RawResponseItem(raw_response_item_event) => {
+            if raw_response_item_event.item.has_input_image() {
+                let mut store = image_context_store.lock().await;
+                store.insert(conversation_id, true);
+            }
             maybe_emit_raw_response_item_completed(
                 api_version,
                 conversation_id,

@@ -1796,6 +1796,12 @@ pub struct Thread {
     pub id: String,
     /// Usually the first user message in the thread, if available.
     pub preview: String,
+    /// Tri-state image-context signal for the conversation:
+    /// - `Some(true)`: image input is known to exist in conversation context
+    /// - `Some(false)`: known to be text-only
+    /// - `None`: unknown / not yet determined
+    #[serde(default)]
+    pub has_image_context: Option<bool>,
     /// Model provider used for this thread (for example, 'openai').
     pub model_provider: String,
     /// Unix timestamp (in seconds) when the thread was created.

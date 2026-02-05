@@ -138,6 +138,13 @@ pub struct ConversationSummary {
     pub conversation_id: ThreadId,
     pub path: PathBuf,
     pub preview: String,
+    /// Tri-state image-context signal for the conversation:
+    /// - `Some(true)`: image input is known to exist in conversation context
+    /// - `Some(false)`: known to be text-only
+    /// - `None`: unknown / not yet determined
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub has_image_context: Option<bool>,
     pub timestamp: Option<String>,
     pub updated_at: Option<String>,
     pub model_provider: String,

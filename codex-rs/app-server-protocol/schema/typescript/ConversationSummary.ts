@@ -5,4 +5,11 @@ import type { ConversationGitInfo } from "./ConversationGitInfo";
 import type { SessionSource } from "./SessionSource";
 import type { ThreadId } from "./ThreadId";
 
-export type ConversationSummary = { conversationId: ThreadId, path: string, preview: string, timestamp: string | null, updatedAt: string | null, modelProvider: string, cwd: string, cliVersion: string, source: SessionSource, gitInfo: ConversationGitInfo | null, };
+export type ConversationSummary = { conversationId: ThreadId, path: string, preview: string, 
+/**
+ * Tri-state image-context signal for the conversation:
+ * - `Some(true)`: image input is known to exist in conversation context
+ * - `Some(false)`: known to be text-only
+ * - `None`: unknown / not yet determined
+ */
+hasImageContext?: boolean | null, timestamp: string | null, updatedAt: string | null, modelProvider: string, cwd: string, cliVersion: string, source: SessionSource, gitInfo: ConversationGitInfo | null, };

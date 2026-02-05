@@ -2205,6 +2205,13 @@
             }
           ]
         },
+        "hasImageContext": {
+          "description": "Tri-state image-context signal for the conversation: - `Some(true)`: image input is known to exist in conversation context - `Some(false)`: known to be text-only - `None`: unknown / not yet determined",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "modelProvider": {
           "type": "string"
         },
@@ -13864,6 +13871,14 @@
               }
             ],
             "description": "Optional Git metadata captured when the thread was created."
+          },
+          "hasImageContext": {
+            "default": null,
+            "description": "Tri-state image-context signal for the conversation: - `Some(true)`: image input is known to exist in conversation context - `Some(false)`: known to be text-only - `None`: unknown / not yet determined",
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "id": {
             "type": "string"

@@ -247,6 +247,7 @@ pub(crate) struct TurnSummary {
 }
 
 pub(crate) type TurnSummaryStore = Arc<Mutex<HashMap<ThreadId, TurnSummary>>>;
+pub(crate) type ImageContextStore = Arc<Mutex<HashMap<ThreadId, bool>>>;
 
 const THREAD_LIST_DEFAULT_LIMIT: usize = 25;
 const THREAD_LIST_MAX_LIMIT: usize = 100;
@@ -286,6 +287,7 @@ pub(crate) struct CodexMessageProcessor {
     // Queue of pending rollback requests per conversation. We reply when ThreadRollback arrives.
     pending_rollbacks: PendingRollbacks,
     turn_summary_store: TurnSummaryStore,
+    image_context_store: ImageContextStore,
     pending_fuzzy_searches: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     feedback: CodexFeedback,
 }
@@ -356,6 +358,7 @@ impl CodexMessageProcessor {
             pending_interrupts: Arc::new(Mutex::new(HashMap::new())),
             pending_rollbacks: Arc::new(Mutex::new(HashMap::new())),
             turn_summary_store: Arc::new(Mutex::new(HashMap::new())),
+            image_context_store: Arc::new(Mutex::new(HashMap::new())),
             pending_fuzzy_searches: Arc::new(Mutex::new(HashMap::new())),
             feedback,
         }
@@ -2255,7 +2258,17 @@ impl CodexMessageProcessor {
         let mut thread = if let Some(rollout_path) = rollout_path.as_ref() {
             let fallback_provider = self.config.model_provider_id.as_str();
             match read_summary_from_rollout(rollout_path, fallback_provider).await {
-                Ok(summary) => summary_to_thread(summary),
+                Ok(summary) => {
+                    let mut thread = summary_to_thread(summary);
+                    thread.has_image_context = resolve_has_image_context(
+                        &self.image_context_store,
+                        thread_uuid,
+                        thread.has_image_context,
+                        rollout_path.as_path(),
+                    )
+                    .await;
+                    thread
+                }
                 Err(err) => {
                     self.send_internal_error(
                         request_id,
@@ -2517,6 +2530,13 @@ impl CodexMessageProcessor {
                         return;
                     }
                 };
+                thread.has_image_context = resolve_has_image_context(
+                    &self.image_context_store,
+                    thread_id,
+                    thread.has_image_context,
+                    rollout_path.as_path(),
+                )
+                .await;
                 thread.turns = initial_messages
                     .as_deref()
                     .map_or_else(Vec::new, build_turns_from_event_msgs);
@@ -2729,6 +2749,13 @@ impl CodexMessageProcessor {
                 return;
             }
         };
+        thread.has_image_context = resolve_has_image_context(
+            &self.image_context_store,
+            thread_id,
+            thread.has_image_context,
+            rollout_path.as_path(),
+        )
+        .await;
         thread.turns = initial_messages
             .as_deref()
             .map_or_else(Vec::new, build_turns_from_event_msgs);
@@ -2789,7 +2816,14 @@ impl CodexMessageProcessor {
 
         let fallback_provider = self.config.model_provider_id.as_str();
         match read_summary_from_rollout(&path, fallback_provider).await {
-            Ok(summary) => {
+            Ok(mut summary) => {
+                summary.has_image_context = resolve_has_image_context(
+                    &self.image_context_store,
+                    summary.conversation_id,
+                    summary.has_image_context,
+                    &path,
+                )
+                .await;
                 let response = GetConversationSummaryResponse { summary };
                 self.outgoing.send_response(request_id, response).await;
             }
@@ -2917,29 +2951,43 @@ impl CodexMessageProcessor {
                 })?
             };
 
-            let mut filtered = page
-                .items
-                .into_iter()
-                .filter_map(|it| {
-                    let updated_at = it.updated_at.clone();
-                    let session_meta_line = it.head.first().and_then(|first| {
-                        serde_json::from_value::<SessionMetaLine>(first.clone()).ok()
-                    })?;
-                    extract_conversation_summary(
-                        it.path,
-                        &it.head,
-                        &session_meta_line.meta,
-                        session_meta_line.git.as_ref(),
-                        fallback_provider.as_str(),
-                        updated_at,
-                    )
-                })
-                .filter(|summary| {
-                    source_kind_filter
-                        .as_ref()
-                        .is_none_or(|filter| source_kind_matches(&summary.source, filter))
-                })
-                .collect::<Vec<_>>();
+            let mut filtered = Vec::new();
+            for it in page.items.into_iter() {
+                let updated_at = it.updated_at.clone();
+                let session_meta_line = it.head.first().and_then(|first| {
+                    serde_json::from_value::<SessionMetaLine>(first.clone()).ok()
+                });
+                let Some(session_meta_line) = session_meta_line else {
+                    continue;
+                };
+
+                let mut summary = match extract_conversation_summary(
+                    it.path,
+                    &it.head,
+                    &session_meta_line.meta,
+                    session_meta_line.git.as_ref(),
+                    fallback_provider.as_str(),
+                    updated_at,
+                ) {
+                    Some(summary) => summary,
+                    None => continue,
+                };
+
+                summary.has_image_context = resolve_has_image_context(
+                    &self.image_context_store,
+                    summary.conversation_id,
+                    summary.has_image_context,
+                    summary.path.as_path(),
+                )
+                .await;
+
+                if source_kind_filter
+                    .as_ref()
+                    .is_none_or(|filter| source_kind_matches(&summary.source, filter))
+                {
+                    filtered.push(summary);
+                }
+            }
             if filtered.len() > remaining {
                 filtered.truncate(remaining);
             }
@@ -3899,6 +3947,10 @@ impl CodexMessageProcessor {
             return;
         };
 
+        let has_image_input = items.iter().any(|item| {
+            matches!(item, WireInputItem::Image { .. } | WireInputItem::LocalImage { .. })
+        });
+
         let mapped_items: Vec<CoreInputItem> = items
             .into_iter()
             .map(|item| match item {
@@ -3913,6 +3965,11 @@ impl CodexMessageProcessor {
                 WireInputItem::LocalImage { path } => CoreInputItem::LocalImage { path },
             })
             .collect();
+
+        if has_image_input {
+            let mut store = self.image_context_store.lock().await;
+            store.insert(conversation_id, true);
+        }
 
         // Submit user input to the conversation.
         let _ = conversation
@@ -3951,6 +4008,10 @@ impl CodexMessageProcessor {
             return;
         };
 
+        let has_image_input = items.iter().any(|item| {
+            matches!(item, WireInputItem::Image { .. } | WireInputItem::LocalImage { .. })
+        });
+
         let mapped_items: Vec<CoreInputItem> = items
             .into_iter()
             .map(|item| match item {
@@ -3965,6 +4026,11 @@ impl CodexMessageProcessor {
                 WireInputItem::LocalImage { path } => CoreInputItem::LocalImage { path },
             })
             .collect();
+
+        if has_image_input {
+            let mut store = self.image_context_store.lock().await;
+            store.insert(conversation_id, true);
+        }
 
         let _ = conversation
             .submit(Op::UserTurn {
@@ -4620,6 +4686,7 @@ impl CodexMessageProcessor {
         let pending_interrupts = self.pending_interrupts.clone();
         let pending_rollbacks = self.pending_rollbacks.clone();
         let turn_summary_store = self.turn_summary_store.clone();
+        let image_context_store = self.image_context_store.clone();
         let api_version_for_task = api_version;
         let fallback_model_provider = self.config.model_provider_id.clone();
         tokio::spawn(async move {
@@ -4683,6 +4750,7 @@ impl CodexMessageProcessor {
                             pending_interrupts.clone(),
                             pending_rollbacks.clone(),
                             turn_summary_store.clone(),
+                            image_context_store.clone(),
                             api_version_for_task,
                             fallback_model_provider.clone(),
                         )
@@ -5011,6 +5079,7 @@ pub(crate) async fn read_summary_from_rollout(
     fallback_provider: &str,
 ) -> std::io::Result<ConversationSummary> {
     let head = read_head_for_summary(path).await?;
+    let has_image_context = head_has_image_context(&head);
 
     let Some(first) = head.first() else {
         return Err(IoError::other(format!(
@@ -5066,6 +5135,7 @@ pub(crate) async fn read_summary_from_rollout(
         updated_at,
         path: path.to_path_buf(),
         preview: String::new(),
+        has_image_context,
         model_provider,
         cwd: session_meta.cwd,
         cli_version: session_meta.cli_version,
@@ -5090,6 +5160,61 @@ pub(crate) async fn read_event_msgs_from_rollout(
             _ => None,
         })
         .collect())
+}
+
+async fn resolve_has_image_context(
+    store: &ImageContextStore,
+    thread_id: ThreadId,
+    head_has_image_context: Option<bool>,
+    rollout_path: &Path,
+) -> Option<bool> {
+    if let Some(cached) = store.lock().await.get(&thread_id).copied() {
+        return Some(cached);
+    }
+
+    if let Some(value) = head_has_image_context {
+        store.lock().await.insert(thread_id, value);
+        return Some(value);
+    }
+
+    match read_rollout_has_image_context(rollout_path).await {
+        Ok(has_image_context) => {
+            store.lock().await.insert(thread_id, has_image_context);
+            Some(has_image_context)
+        }
+        Err(err) => {
+            warn!(
+                "failed to determine image context for rollout {}: {err}",
+                rollout_path.display()
+            );
+            None
+        }
+    }
+}
+
+pub(crate) async fn read_rollout_has_image_context(path: &Path) -> std::io::Result<bool> {
+    let items = match RolloutRecorder::get_rollout_history(path).await? {
+        InitialHistory::New => Vec::new(),
+        InitialHistory::Forked(items) => items,
+        InitialHistory::Resumed(resumed) => resumed.history,
+    };
+
+    Ok(items.into_iter().rev().any(|item| match item {
+        RolloutItem::ResponseItem(response_item) => response_item.has_input_image(),
+        _ => false,
+    }))
+}
+
+fn head_has_image_context(head: &[serde_json::Value]) -> Option<bool> {
+    if head
+        .iter()
+        .filter_map(|value| serde_json::from_value::<ResponseItem>(value.clone()).ok())
+        .any(|item| item.has_input_image())
+    {
+        Some(true)
+    } else {
+        None
+    }
 }
 
 fn extract_conversation_summary(
@@ -5125,6 +5250,7 @@ fn extract_conversation_summary(
         .unwrap_or_else(|| fallback_provider.to_string());
     let git_info = git.map(map_git_info);
     let updated_at = updated_at.or_else(|| timestamp.clone());
+    let has_image_context = head_has_image_context(head);
 
     Some(ConversationSummary {
         conversation_id,
@@ -5132,6 +5258,7 @@ fn extract_conversation_summary(
         updated_at,
         path,
         preview: preview.to_string(),
+        has_image_context,
         model_provider,
         cwd: session_meta.cwd.clone(),
         cli_version: session_meta.cli_version.clone(),
@@ -5173,6 +5300,7 @@ fn build_ephemeral_thread(thread_id: ThreadId, config_snapshot: &ThreadConfigSna
     Thread {
         id: thread_id.to_string(),
         preview: String::new(),
+        has_image_context: Some(false),
         model_provider: config_snapshot.model_provider_id.clone(),
         created_at: now,
         updated_at: now,
@@ -5190,6 +5318,7 @@ pub(crate) fn summary_to_thread(summary: ConversationSummary) -> Thread {
         conversation_id,
         path,
         preview,
+        has_image_context,
         timestamp,
         updated_at,
         model_provider,
@@ -5210,6 +5339,7 @@ pub(crate) fn summary_to_thread(summary: ConversationSummary) -> Thread {
     Thread {
         id: conversation_id.to_string(),
         preview,
+        has_image_context,
         model_provider,
         created_at: created_at.map(|dt| dt.timestamp()).unwrap_or(0),
         updated_at: updated_at.map(|dt| dt.timestamp()).unwrap_or(0),
@@ -5304,6 +5434,7 @@ mod tests {
             updated_at: timestamp,
             path,
             preview: "Count to 5".to_string(),
+            has_image_context: None,
             model_provider: "test-provider".to_string(),
             cwd: PathBuf::from("/"),
             cli_version: "0.0.0".to_string(),
@@ -5312,6 +5443,58 @@ mod tests {
         };
 
         assert_eq!(summary, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn extract_conversation_summary_sets_has_image_context_when_image_present() -> Result<()> {
+        let conversation_id = ThreadId::from_string("61c9609b-28bc-4e7f-a408-bf35f53d42de")?;
+        let timestamp = Some("2025-09-04T13:00:00Z".to_string());
+        let path = PathBuf::from("rollout.jsonl");
+
+        let head = vec![
+            json!({
+                "id": conversation_id.to_string(),
+                "timestamp": timestamp,
+                "cwd": "/",
+                "originator": "codex",
+                "cli_version": "0.0.0",
+                "model_provider": "test-provider"
+            }),
+            json!({
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_image",
+                    "image_url": "data:image/png;base64,abc123",
+                }],
+            }),
+            json!({
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": format!("{USER_MESSAGE_BEGIN}Describe this image"),
+                }],
+            }),
+        ];
+
+        let session_meta = serde_json::from_value::<SessionMeta>(head[0].clone())?;
+
+        let summary = extract_conversation_summary(
+            path.clone(),
+            &head,
+            &session_meta,
+            None,
+            "test-provider",
+            Some("2025-09-04T13:00:00Z".to_string()),
+        )
+        .expect("summary");
+
+        assert_eq!(summary.has_image_context, Some(true));
+        // Preview currently derives from the first user message; image-only messages produce
+        // an empty preview.
+        assert_eq!(summary.preview, "");
         Ok(())
     }
 
@@ -5360,6 +5543,7 @@ mod tests {
             updated_at: Some("2025-09-05T16:53:11Z".to_string()),
             path: path.clone(),
             preview: String::new(),
+            has_image_context: None,
             model_provider: "fallback".to_string(),
             cwd: PathBuf::new(),
             cli_version: String::new(),
@@ -5368,6 +5552,60 @@ mod tests {
         };
 
         assert_eq!(summary, expected);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn read_rollout_has_image_context_detects_images() -> Result<()> {
+        use codex_protocol::models::ContentItem;
+        use codex_protocol::protocol::RolloutItem;
+        use codex_protocol::protocol::RolloutLine;
+        use codex_protocol::protocol::SessionMetaLine;
+        use std::fs;
+
+        let temp_dir = TempDir::new()?;
+        let path = temp_dir.path().join("rollout.jsonl");
+
+        let conversation_id = ThreadId::from_string("f3225d70-c282-4eaf-bb39-c474f8194bcb")?;
+        let timestamp = "2025-09-06T10:10:10.000Z".to_string();
+
+        let session_meta = SessionMeta {
+            id: conversation_id,
+            timestamp: timestamp.clone(),
+            model_provider: None,
+            ..SessionMeta::default()
+        };
+
+        let lines = vec![
+            RolloutLine {
+                timestamp: timestamp.clone(),
+                item: RolloutItem::SessionMeta(SessionMetaLine {
+                    meta: session_meta,
+                    git: None,
+                }),
+            },
+            RolloutLine {
+                timestamp: timestamp.clone(),
+                item: RolloutItem::ResponseItem(ResponseItem::Message {
+                    id: None,
+                    role: "user".to_string(),
+                    content: vec![ContentItem::InputImage {
+                        image_url: "data:image/png;base64,abc123".to_string(),
+                    }],
+                    end_turn: None,
+                    phase: None,
+                }),
+            },
+        ];
+
+        let mut contents = String::new();
+        for line in lines {
+            contents.push_str(&serde_json::to_string(&line)?);
+            contents.push('\n');
+        }
+        fs::write(&path, contents)?;
+
+        assert_eq!(read_rollout_has_image_context(path.as_path()).await?, true);
         Ok(())
     }
 }
