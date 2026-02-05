@@ -151,6 +151,7 @@ use crate::bottom_pane::ExperimentalFeaturesView;
 use crate::bottom_pane::FeedbackAudience;
 use crate::bottom_pane::InputResult;
 use crate::bottom_pane::LocalImageAttachment;
+use crate::bottom_pane::MentionBinding;
 use crate::bottom_pane::QUIT_SHORTCUT_TIMEOUT;
 use crate::bottom_pane::SelectionAction;
 use crate::bottom_pane::SelectionItem;
@@ -197,6 +198,8 @@ mod skills;
 use self::skills::collect_tool_mentions;
 use self::skills::find_app_mentions;
 use self::skills::find_skill_mentions_with_tool_mentions;
+use crate::mention_codec::LinkedMention;
+use crate::mention_codec::encode_history_mentions;
 use crate::streaming::chunking::AdaptiveChunkingPolicy;
 use crate::streaming::commit_tick::CommitTickScope;
 use crate::streaming::commit_tick::run_commit_tick;
@@ -611,7 +614,7 @@ pub(crate) struct UserMessage {
     text: String,
     local_images: Vec<LocalImageAttachment>,
     text_elements: Vec<TextElement>,
-    mention_paths: HashMap<String, String>,
+    mention_bindings: Vec<MentionBinding>,
 }
 
 impl From<String> for UserMessage {
@@ -621,7 +624,7 @@ impl From<String> for UserMessage {
             local_images: Vec::new(),
             // Plain text conversion has no UI element ranges.
             text_elements: Vec::new(),
-            mention_paths: HashMap::new(),
+            mention_bindings: Vec::new(),
         }
     }
 }
@@ -633,7 +636,7 @@ impl From<&str> for UserMessage {
             local_images: Vec::new(),
             // Plain text conversion has no UI element ranges.
             text_elements: Vec::new(),
-            mention_paths: HashMap::new(),
+            mention_bindings: Vec::new(),
         }
     }
 }
@@ -659,7 +662,7 @@ pub(crate) fn create_initial_user_message(
             text,
             local_images,
             text_elements,
-            mention_paths: HashMap::new(),
+            mention_bindings: Vec::new(),
         })
     }
 }
@@ -673,14 +676,14 @@ fn remap_placeholders_for_message(message: UserMessage, next_label: &mut usize) 
         text,
         text_elements,
         local_images,
-        mention_paths,
+        mention_bindings,
     } = message;
     if local_images.is_empty() {
         return UserMessage {
             text,
             text_elements,
             local_images,
-            mention_paths,
+            mention_bindings,
         };
     }
 
@@ -735,7 +738,7 @@ fn remap_placeholders_for_message(message: UserMessage, next_label: &mut usize) 
         text: rebuilt,
         local_images: remapped_images,
         text_elements: rebuilt_elements,
-        mention_paths,
+        mention_bindings,
     }
 }
 
@@ -1419,10 +1422,11 @@ impl ChatWidget {
                 .iter()
                 .map(|img| img.path.clone())
                 .collect();
-            self.bottom_pane.set_composer_text(
+            self.bottom_pane.set_composer_text_with_mention_bindings(
                 combined.text,
                 combined.text_elements,
                 combined_local_image_paths,
+                combined.mention_bindings,
             );
             self.refresh_queued_user_messages();
         }
@@ -1446,7 +1450,7 @@ impl ChatWidget {
             text: self.bottom_pane.composer_text(),
             text_elements: self.bottom_pane.composer_text_elements(),
             local_images: self.bottom_pane.composer_local_images(),
-            mention_paths: HashMap::new(),
+            mention_bindings: self.bottom_pane.composer_mention_bindings(),
         };
 
         let mut to_merge: Vec<UserMessage> = self.queued_user_messages.drain(..).collect();
@@ -1458,7 +1462,7 @@ impl ChatWidget {
             text: String::new(),
             text_elements: Vec::new(),
             local_images: Vec::new(),
-            mention_paths: HashMap::new(),
+            mention_bindings: Vec::new(),
         };
         let mut combined_offset = 0usize;
         let mut next_image_label = 1usize;
@@ -1480,7 +1484,7 @@ impl ChatWidget {
                     elem
                 }));
             combined.local_images.extend(message.local_images);
-            combined.mention_paths.extend(message.mention_paths);
+            combined.mention_bindings.extend(message.mention_bindings);
         }
 
         Some(combined)
@@ -2737,7 +2741,9 @@ impl ChatWidget {
                             .bottom_pane
                             .take_recent_submission_images_with_placeholders(),
                         text_elements,
-                        mention_paths: self.bottom_pane.take_mention_paths(),
+                        mention_bindings: self
+                            .bottom_pane
+                            .take_recent_submission_mention_bindings(),
                     };
                     if self.is_session_configured() {
                         // Submitted is only emitted when steer is enabled (Enter sends immediately).
@@ -2760,7 +2766,9 @@ impl ChatWidget {
                             .bottom_pane
                             .take_recent_submission_images_with_placeholders(),
                         text_elements,
-                        mention_paths: self.bottom_pane.take_mention_paths(),
+                        mention_bindings: self
+                            .bottom_pane
+                            .take_recent_submission_mention_bindings(),
                     };
                     self.queue_user_message(user_message);
                 }
@@ -3124,7 +3132,7 @@ impl ChatWidget {
                         .bottom_pane
                         .take_recent_submission_images_with_placeholders(),
                     text_elements: prepared_elements,
-                    mention_paths: self.bottom_pane.take_mention_paths(),
+                    mention_bindings: self.bottom_pane.take_recent_submission_mention_bindings(),
                 };
                 if self.is_session_configured() {
                     self.reasoning_buffer.clear();
@@ -3261,13 +3269,18 @@ impl ChatWidget {
             text,
             local_images,
             text_elements,
-            mention_paths,
+            mention_bindings,
         } = user_message;
         if text.is_empty() && local_images.is_empty() {
             return;
         }
         if !local_images.is_empty() && !self.current_model_supports_images() {
-            self.restore_blocked_image_submission(text, text_elements, local_images, mention_paths);
+            self.restore_blocked_image_submission(
+                text,
+                text_elements,
+                local_images,
+                mention_bindings,
+            );
             return;
         }
 
@@ -3304,16 +3317,43 @@ impl ChatWidget {
             });
         }
 
-        let mentions = collect_tool_mentions(&text, &mention_paths);
+        let mentions = collect_tool_mentions(&text, &HashMap::new());
+        let bound_names: HashSet<String> = mention_bindings
+            .iter()
+            .map(|binding| binding.mention.clone())
+            .collect();
         let mut skill_names_lower: HashSet<String> = HashSet::new();
+        let mut selected_skill_paths: HashSet<PathBuf> = HashSet::new();
 
         if let Some(skills) = self.bottom_pane.skills() {
             skill_names_lower = skills
                 .iter()
                 .map(|skill| skill.name.to_ascii_lowercase())
                 .collect();
+
+            for binding in &mention_bindings {
+                let path = binding
+                    .path
+                    .strip_prefix("skill://")
+                    .unwrap_or(binding.path.as_str());
+                let path = Path::new(path);
+                if let Some(skill) = skills.iter().find(|skill| skill.path.as_path() == path)
+                    && selected_skill_paths.insert(skill.path.clone())
+                {
+                    items.push(UserInput::Skill {
+                        name: skill.name.clone(),
+                        path: skill.path.clone(),
+                    });
+                }
+            }
+
             let skill_mentions = find_skill_mentions_with_tool_mentions(&mentions, skills);
             for skill in skill_mentions {
+                if bound_names.contains(skill.name.as_str())
+                    || !selected_skill_paths.insert(skill.path.clone())
+                {
+                    continue;
+                }
                 items.push(UserInput::Skill {
                     name: skill.name.clone(),
                     path: skill.path.clone(),
@@ -3321,9 +3361,33 @@ impl ChatWidget {
             }
         }
 
+        let mut selected_app_ids: HashSet<String> = HashSet::new();
         if let Some(apps) = self.connectors_for_mentions() {
+            for binding in &mention_bindings {
+                let Some(app_id) = binding
+                    .path
+                    .strip_prefix("app://")
+                    .filter(|id| !id.is_empty())
+                else {
+                    continue;
+                };
+                if !selected_app_ids.insert(app_id.to_string()) {
+                    continue;
+                }
+                if let Some(app) = apps.iter().find(|app| app.id == app_id) {
+                    items.push(UserInput::Mention {
+                        name: app.name.clone(),
+                        path: binding.path.clone(),
+                    });
+                }
+            }
+
             let app_mentions = find_app_mentions(&mentions, apps, &skill_names_lower);
             for app in app_mentions {
+                let slug = codex_core::connectors::connector_mention_slug(&app);
+                if bound_names.contains(&slug) || !selected_app_ids.insert(app.id.clone()) {
+                    continue;
+                }
                 let app_id = app.id.as_str();
                 items.push(UserInput::Mention {
                     name: app.name.clone(),
@@ -3364,8 +3428,16 @@ impl ChatWidget {
 
         // Persist the text to cross-session message history.
         if !text.is_empty() {
+            let encoded_mentions = mention_bindings
+                .iter()
+                .map(|binding| LinkedMention {
+                    mention: binding.mention.clone(),
+                    path: binding.path.clone(),
+                })
+                .collect::<Vec<_>>();
+            let history_text = encode_history_mentions(&text, &encoded_mentions);
             self.codex_op_tx
-                .send(Op::AddToHistory { text: text.clone() })
+                .send(Op::AddToHistory { text: history_text })
                 .unwrap_or_else(|e| {
                     tracing::error!("failed to send AddHistory op: {e}");
                 });
@@ -3388,7 +3460,7 @@ impl ChatWidget {
     ///
     /// The blocked-image path intentionally keeps the draft in the composer so
     /// users can remove attachments and retry. We must restore
-    /// `mention_paths` alongside visible text; restoring only `$name` tokens
+    /// mention bindings alongside visible text; restoring only `$name` tokens
     /// makes the draft look correct while degrading mention resolution to
     /// name-only heuristics on retry.
     fn restore_blocked_image_submission(
@@ -3396,15 +3468,15 @@ impl ChatWidget {
         text: String,
         text_elements: Vec<TextElement>,
         local_images: Vec<LocalImageAttachment>,
-        mention_paths: HashMap<String, String>,
+        mention_bindings: Vec<MentionBinding>,
     ) {
         // Preserve the user's composed payload so they can retry after changing models.
         let local_image_paths = local_images.iter().map(|img| img.path.clone()).collect();
-        self.bottom_pane.set_composer_text_with_mention_paths(
+        self.bottom_pane.set_composer_text_with_mention_bindings(
             text,
             text_elements,
             local_image_paths,
-            mention_paths,
+            mention_bindings,
         );
         self.add_to_history(history_cell::new_warning_event(
             self.image_inputs_not_supported_message(),
