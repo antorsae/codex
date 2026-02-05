@@ -1053,38 +1053,13 @@ impl Session {
             next_internal_sub_id: AtomicU64::new(0),
         });
 
-        let preconnect_web_search_eligible = !matches!(
-            resolve_web_search_mode_for_turn(
-                config.web_search_mode,
-                session_configuration.provider.is_azure_responses_endpoint(),
-                session_configuration.sandbox_policy.get(),
-            ),
-            WebSearchMode::Disabled
-        );
-        // Warm a websocket in the background so the first turn can reuse it when headers match.
+        // Warm a websocket in the background so the first turn can reuse it.
         // This performs only connection setup; user input is still sent later via response.create
         // when submit_turn() runs.
-        {
-            let model_client = sess.services.model_client.clone();
-            let otel_manager = sess.services.otel_manager.clone();
-            let preconnect_cwd = session_configuration.cwd.clone();
-            tokio::spawn(async move {
-                const TURN_METADATA_HEADER_TIMEOUT_MS: u64 = 250;
-                let turn_metadata_header: Option<String> = tokio::time::timeout(
-                    std::time::Duration::from_millis(TURN_METADATA_HEADER_TIMEOUT_MS),
-                    build_turn_metadata_header(preconnect_cwd.as_path()),
-                )
-                .await
-                .unwrap_or_default();
-                let _ = model_client
-                    .preconnect(
-                        &otel_manager,
-                        preconnect_web_search_eligible,
-                        turn_metadata_header.as_deref(),
-                    )
-                    .await;
-            });
-        }
+        sess.services.model_client.pre_establish_connection(
+            sess.services.otel_manager.clone(),
+            session_configuration.cwd.clone(),
+        );
 
         // Dispatch the SessionConfiguredEvent first and then report any errors.
         // If resuming, include converted initial messages in the payload so UIs can render them immediately.

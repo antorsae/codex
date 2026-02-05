@@ -13,11 +13,13 @@
 //! from a session-level preconnect) and stores per-turn state such as the `x-codex-turn-state`
 //! token used for sticky routing.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::time::Duration as StdDuration;
 
 use crate::api_bridge::CoreAuthProvider;
 use crate::api_bridge::auth_provider_from_auth;
@@ -84,6 +86,7 @@ use crate::flags::CODEX_RS_SSE_FIXTURE;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
 use crate::tools::spec::create_tools_json_for_responses_api;
+use crate::turn_metadata::build_turn_metadata_header;
 
 pub const WEB_SEARCH_ELIGIBLE_HEADER: &str = "x-oai-web-search-eligible";
 pub const X_CODEX_TURN_STATE_HEADER: &str = "x-codex-turn-state";
@@ -91,36 +94,10 @@ pub const X_CODEX_TURN_METADATA_HEADER: &str = "x-codex-turn-metadata";
 pub const X_RESPONSESAPI_INCLUDE_TIMING_METRICS_HEADER: &str =
     "x-responsesapi-include-timing-metrics";
 
-/// A session-scoped websocket warmed before the first user turn starts.
-///
-/// This stores only transport state. The preconnect path performs the websocket
-/// handshake and captures any server-provided turn-state header, but it does not
-/// send `response.create` or any user prompt payload.
-///
-/// Callers must validate connection-scoped headers before reuse to avoid sharing a
-/// warmed socket across incompatible turn settings.
-struct PreconnectedWebSocket {
-    connection: ApiWebSocketConnection,
-    web_search_eligible: bool,
-    turn_metadata_header: Option<String>,
-    turn_state: Option<String>,
-}
-
-impl std::fmt::Debug for PreconnectedWebSocket {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PreconnectedWebSocket")
-            .field("web_search_eligible", &self.web_search_eligible)
-            .field("turn_metadata_header", &self.turn_metadata_header)
-            .field("turn_state", &self.turn_state)
-            .finish_non_exhaustive()
-    }
-}
-
 /// Session-scoped state shared by all [`ModelClient`] clones.
 ///
 /// This is intentionally kept minimal so `ModelClient` does not need to hold a full `Config`. Most
 /// configuration is per turn and is passed explicitly to streaming/unary methods.
-#[derive(Debug)]
 struct ModelClientState {
     auth_manager: Option<Arc<AuthManager>>,
     conversation_id: ThreadId,
@@ -136,7 +113,48 @@ struct ModelClientState {
     ///
     /// The slot is consumed on read to avoid accidentally sharing one socket across
     /// multiple concurrent turn sessions.
-    preconnected_websocket: Mutex<Option<PreconnectedWebSocket>>,
+    preconnected_websocket: Mutex<Option<ApiWebSocketConnection>>,
+    /// Sticky routing token captured from a preconnected websocket handshake.
+    ///
+    /// This is consumed together with `preconnected_websocket`.
+    preconnected_turn_state: Mutex<Option<String>>,
+}
+
+impl std::fmt::Debug for ModelClientState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModelClientState")
+            .field("auth_manager", &self.auth_manager)
+            .field("conversation_id", &self.conversation_id)
+            .field("provider", &self.provider)
+            .field("session_source", &self.session_source)
+            .field("model_verbosity", &self.model_verbosity)
+            .field(
+                "enable_responses_websockets",
+                &self.enable_responses_websockets,
+            )
+            .field(
+                "enable_request_compression",
+                &self.enable_request_compression,
+            )
+            .field("include_timing_metrics", &self.include_timing_metrics)
+            .field("beta_features_header", &self.beta_features_header)
+            .field(
+                "disable_websockets",
+                &self.disable_websockets.load(Ordering::Relaxed),
+            )
+            .field("preconnected_websocket", &"<opaque>")
+            .finish()
+    }
+}
+
+/// Resolved API client setup for a single request attempt.
+///
+/// Keeping this as a single bundle ensures preconnect and normal request paths
+/// share the same auth/provider setup flow.
+struct CurrentClientSetup {
+    auth: Option<CodexAuth>,
+    api_provider: codex_api::Provider,
+    api_auth: CoreAuthProvider,
 }
 
 /// A session-scoped client for model-provider API calls.
@@ -218,6 +236,7 @@ impl ModelClient {
                 beta_features_header,
                 disable_websockets: AtomicBool::new(false),
                 preconnected_websocket: Mutex::new(None),
+                preconnected_turn_state: Mutex::new(None),
             }),
         }
     }
@@ -225,8 +244,8 @@ impl ModelClient {
     /// Creates a fresh turn-scoped streaming session.
     ///
     /// This constructor does not perform network I/O itself. The returned session either adopts a
-    /// previously preconnected websocket (when headers match) or opens a websocket lazily when the
-    /// first stream request is issued.
+    /// previously preconnected websocket or opens a websocket lazily when the first stream request
+    /// is issued.
     pub fn new_session(&self) -> ModelClientSession {
         ModelClientSession {
             client: self.clone(),
@@ -236,119 +255,66 @@ impl ModelClient {
         }
     }
 
-    /// Opportunistically pre-establishes a Responses WebSocket connection for this session.
+    /// Spawns a best-effort task that warms a websocket for the first turn.
     ///
-    /// The cached connection is reused by the next turn only if that turn's connection-scoped
-    /// headers (`x-oai-web-search-eligible`, `x-codex-turn-metadata`) match this preconnect call.
-    /// On mismatch, the preconnected socket is dropped and the turn opens a fresh connection.
+    /// This call performs only connection setup; it never sends prompt payloads.
+    pub fn pre_establish_connection(&self, otel_manager: OtelManager, cwd: PathBuf) {
+        let model_client = self.clone();
+        tokio::spawn(async move {
+            const TURN_METADATA_HEADER_TIMEOUT_MS: u64 = 250;
+            let turn_metadata_header: Option<String> = tokio::time::timeout(
+                StdDuration::from_millis(TURN_METADATA_HEADER_TIMEOUT_MS),
+                build_turn_metadata_header(cwd.as_path()),
+            )
+            .await
+            .unwrap_or_default();
+            let _ = model_client
+                .preconnect(&otel_manager, turn_metadata_header.as_deref())
+                .await;
+        });
+    }
+
+    /// Opportunistically pre-establishes a Responses WebSocket connection for this session.
     ///
     /// This method is best-effort: it returns `false` on any setup/connect failure and the caller
     /// should continue normally. A successful preconnect reduces first-turn latency but never sends
     /// an initial prompt; the first `response.create` is still sent only when a turn starts.
-    ///
-    /// Callers should pass the same connection-scoped values they expect to use on the first turn.
-    /// If these inputs differ from the eventual stream call, the warmed socket is intentionally
-    /// discarded and the first turn pays a fresh handshake cost.
     pub async fn preconnect(
         &self,
         otel_manager: &OtelManager,
-        web_search_eligible: bool,
         turn_metadata_header: Option<&str>,
     ) -> bool {
         if !self.responses_websocket_enabled() || self.disable_websockets() {
             return false;
         }
 
-        let auth_manager = self.state.auth_manager.clone();
-        let normalized_turn_metadata = normalize_turn_metadata_header(turn_metadata_header);
-        let turn_state = Arc::new(OnceLock::new());
-        let mut auth_recovery = auth_manager
-            .as_ref()
-            .map(super::auth::AuthManager::unauthorized_recovery);
-
-        loop {
-            let auth = match auth_manager.as_ref() {
-                Some(manager) => manager.auth().await,
-                None => None,
-            };
-
-            let api_provider = match self
-                .state
-                .provider
-                .to_api_provider(auth.as_ref().map(CodexAuth::internal_auth_mode))
-            {
-                Ok(provider) => provider,
-                Err(err) => {
-                    warn!("failed to build provider for websocket preconnect: {err}");
-                    return false;
-                }
-            };
-            let api_auth = match auth_provider_from_auth(auth.clone(), &self.state.provider) {
-                Ok(auth) => auth,
-                Err(err) => {
-                    warn!("failed to build auth for websocket preconnect: {err}");
-                    return false;
-                }
-            };
-
-            let turn_metadata_header = parse_turn_metadata_header(turn_metadata_header);
-            let mut headers = build_responses_headers(
-                self.state.beta_features_header.as_deref(),
-                web_search_eligible,
-                Some(&turn_state),
-                turn_metadata_header.as_ref(),
-            );
-            headers.extend(build_conversation_headers(Some(
-                self.state.conversation_id.to_string(),
-            )));
-            if self.state.include_timing_metrics {
-                headers.insert(
-                    X_RESPONSESAPI_INCLUDE_TIMING_METRICS_HEADER,
-                    HeaderValue::from_static("true"),
-                );
+        let client_setup = match self.current_client_setup().await {
+            Ok(client_setup) => client_setup,
+            Err(err) => {
+                warn!("failed to build websocket preconnect client setup: {err}");
+                return false;
             }
+        };
+        let turn_state = Arc::new(OnceLock::new());
 
-            let websocket_telemetry = ModelClientSession::build_websocket_telemetry(otel_manager);
-            let connect_result = ApiWebSocketResponsesClient::new(api_provider, api_auth)
-                .connect(
-                    headers,
-                    Some(Arc::clone(&turn_state)),
-                    Some(websocket_telemetry),
-                )
-                .await;
-
-            match connect_result {
-                Ok(connection) => {
-                    let turn_state = turn_state.get().cloned();
-                    let preconnected = PreconnectedWebSocket {
-                        connection,
-                        web_search_eligible,
-                        turn_metadata_header: normalized_turn_metadata.clone(),
-                        turn_state,
-                    };
-                    let mut slot = self
-                        .state
-                        .preconnected_websocket
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    *slot = Some(preconnected);
-                    return true;
-                }
-                Err(ApiError::Transport(
-                    unauthorized_transport @ TransportError::Http { status, .. },
-                )) if status == StatusCode::UNAUTHORIZED => {
-                    if handle_unauthorized(unauthorized_transport, &mut auth_recovery)
-                        .await
-                        .is_ok()
-                    {
-                        continue;
-                    }
-                    return false;
-                }
-                Err(err) => {
-                    debug!("websocket preconnect failed: {err}");
-                    return false;
-                }
+        match self
+            .connect_websocket(
+                otel_manager,
+                client_setup.api_provider,
+                client_setup.api_auth,
+                Some(Arc::clone(&turn_state)),
+                true,
+                turn_metadata_header,
+            )
+            .await
+        {
+            Ok(connection) => {
+                self.store_preconnected_websocket(connection, turn_state.get().cloned());
+                true
+            }
+            Err(err) => {
+                debug!("websocket preconnect failed: {err}");
+                false
             }
         }
     }
@@ -361,28 +327,131 @@ impl ModelClient {
         self.state.disable_websockets.load(Ordering::Relaxed)
     }
 
-    /// Consumes the warmed websocket slot when connection-scoped headers are compatible.
-    ///
-    /// This is intentionally one-shot: once inspected, the slot is emptied so a stale
-    /// connection cannot be reused by a later turn after state has moved on.
-    fn take_preconnected_websocket(
+    async fn current_client_setup(&self) -> Result<CurrentClientSetup> {
+        let auth = self.current_auth().await;
+        let (api_provider, api_auth) = self.provider_and_auth_from_auth(auth.clone())?;
+        Ok(CurrentClientSetup {
+            auth,
+            api_provider,
+            api_auth,
+        })
+    }
+
+    async fn current_auth(&self) -> Option<CodexAuth> {
+        match self.state.auth_manager.as_ref() {
+            Some(manager) => manager.auth().await,
+            None => None,
+        }
+    }
+
+    fn provider_and_auth_from_auth(
         &self,
-        web_search_eligible: bool,
-        turn_metadata_header: Option<&str>,
-    ) -> Option<PreconnectedWebSocket> {
+        auth: Option<CodexAuth>,
+    ) -> Result<(codex_api::Provider, CoreAuthProvider)> {
+        let api_provider = self
+            .state
+            .provider
+            .to_api_provider(auth.as_ref().map(CodexAuth::internal_auth_mode))?;
+        let api_auth = auth_provider_from_auth(auth, &self.state.provider)?;
+        Ok((api_provider, api_auth))
+    }
+
+    /// Consumes the warmed websocket slot.
+    fn take_preconnected_websocket(&self) -> Option<ApiWebSocketConnection> {
         let mut slot = self
             .state
             .preconnected_websocket
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let preconnected = slot.take()?;
-        let expected_turn_metadata = normalize_turn_metadata_header(turn_metadata_header);
-        if preconnected.web_search_eligible != web_search_eligible
-            || preconnected.turn_metadata_header != expected_turn_metadata
-        {
-            return None;
+        slot.take()
+    }
+
+    fn store_preconnected_websocket(
+        &self,
+        connection: ApiWebSocketConnection,
+        turn_state: Option<String>,
+    ) {
+        let mut slot = self
+            .state
+            .preconnected_websocket
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *slot = Some(connection);
+        let mut slot_turn_state = self
+            .state
+            .preconnected_turn_state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *slot_turn_state = turn_state;
+    }
+
+    fn take_preconnected_turn_state(&self) -> Option<String> {
+        let mut slot = self
+            .state
+            .preconnected_turn_state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        slot.take()
+    }
+
+    fn clear_preconnected_websocket(&self) {
+        let mut slot = self
+            .state
+            .preconnected_websocket
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *slot = None;
+        let mut slot_turn_state = self
+            .state
+            .preconnected_turn_state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *slot_turn_state = None;
+    }
+
+    fn build_websocket_headers(
+        &self,
+        web_search_eligible: bool,
+        turn_state: Option<&Arc<OnceLock<String>>>,
+        turn_metadata_header: Option<&str>,
+    ) -> ApiHeaderMap {
+        let turn_metadata_header = parse_turn_metadata_header(turn_metadata_header);
+        let mut headers = build_responses_headers(
+            self.state.beta_features_header.as_deref(),
+            web_search_eligible,
+            turn_state,
+            turn_metadata_header.as_ref(),
+        );
+        headers.extend(build_conversation_headers(Some(
+            self.state.conversation_id.to_string(),
+        )));
+        if self.state.include_timing_metrics {
+            headers.insert(
+                X_RESPONSESAPI_INCLUDE_TIMING_METRICS_HEADER,
+                HeaderValue::from_static("true"),
+            );
         }
-        Some(preconnected)
+        headers
+    }
+
+    async fn connect_websocket(
+        &self,
+        otel_manager: &OtelManager,
+        api_provider: codex_api::Provider,
+        api_auth: CoreAuthProvider,
+        turn_state: Option<Arc<OnceLock<String>>>,
+        web_search_eligible: bool,
+        turn_metadata_header: Option<&str>,
+    ) -> std::result::Result<ApiWebSocketConnection, ApiError> {
+        let headers = self.build_websocket_headers(
+            web_search_eligible,
+            turn_state.as_ref(),
+            turn_metadata_header,
+        );
+        let websocket_telemetry = ModelClientSession::build_websocket_telemetry(otel_manager);
+        ApiWebSocketResponsesClient::new(api_provider, api_auth)
+            .connect(headers, turn_state, Some(websocket_telemetry))
+            .await
     }
 
     /// Compacts the current conversation history using the Compact endpoint.
@@ -401,20 +470,12 @@ impl ModelClient {
         if prompt.input.is_empty() {
             return Ok(Vec::new());
         }
-        let auth_manager = self.state.auth_manager.clone();
-        let auth = match auth_manager.as_ref() {
-            Some(manager) => manager.auth().await,
-            None => None,
-        };
-        let api_provider = self
-            .state
-            .provider
-            .to_api_provider(auth.as_ref().map(CodexAuth::internal_auth_mode))?;
-        let api_auth = auth_provider_from_auth(auth.clone(), &self.state.provider)?;
+        let client_setup = self.current_client_setup().await?;
         let transport = ReqwestTransport::new(build_reqwest_client());
         let request_telemetry = Self::build_request_telemetry(otel_manager);
-        let client = ApiCompactClient::new(transport, api_provider, api_auth)
-            .with_telemetry(Some(request_telemetry));
+        let client =
+            ApiCompactClient::new(transport, client_setup.api_provider, client_setup.api_auth)
+                .with_telemetry(Some(request_telemetry));
 
         let instructions = prompt.base_instructions.text.clone();
         let payload = ApiCompactionInput {
@@ -447,20 +508,12 @@ impl ModelClient {
             return Ok(Vec::new());
         }
 
-        let auth_manager = self.state.auth_manager.clone();
-        let auth = match auth_manager.as_ref() {
-            Some(manager) => manager.auth().await,
-            None => None,
-        };
-        let api_provider = self
-            .state
-            .provider
-            .to_api_provider(auth.as_ref().map(CodexAuth::internal_auth_mode))?;
-        let api_auth = auth_provider_from_auth(auth, &self.state.provider)?;
+        let client_setup = self.current_client_setup().await?;
         let transport = ReqwestTransport::new(build_reqwest_client());
         let request_telemetry = Self::build_request_telemetry(otel_manager);
-        let client = ApiMemoriesClient::new(transport, api_provider, api_auth)
-            .with_telemetry(Some(request_telemetry));
+        let client =
+            ApiMemoriesClient::new(transport, client_setup.api_provider, client_setup.api_auth)
+                .with_telemetry(Some(request_telemetry));
 
         let payload = ApiMemoryTraceSummarizeInput {
             model: model_info.slug.clone(),
@@ -661,7 +714,12 @@ impl ModelClientSession {
         options: &ApiResponsesOptions,
     ) -> std::result::Result<&ApiWebSocketConnection, ApiError> {
         // Prefer the session-level preconnect slot before creating a new websocket.
-        self.try_use_preconnected_websocket(web_search_eligible, turn_metadata_header);
+        if let Some(connection) = self.try_use_preconnected_websocket() {
+            if let Some(turn_state) = self.client.take_preconnected_turn_state() {
+                let _ = self.turn_state.set(turn_state);
+            }
+            self.connection = Some(connection);
+        }
 
         let needs_new = match self.connection.as_ref() {
             Some(conn) => conn.is_closed().await,
@@ -669,36 +727,22 @@ impl ModelClientSession {
         };
 
         if needs_new {
-            {
-                // The preconnect slot is single-use and scoped to the immediate next turn.
-                // If we still need a fresh websocket here (mismatch, closed socket, or no slot),
-                // clear any leftover cached connection to avoid future stale reuse attempts.
-                let mut preconnected = self
-                    .client
-                    .state
-                    .preconnected_websocket
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                *preconnected = None;
-            }
-
-            let mut headers = options.extra_headers.clone();
-            headers.extend(build_conversation_headers(options.conversation_id.clone()));
-            if self.client.state.include_timing_metrics {
-                headers.insert(
-                    X_RESPONSESAPI_INCLUDE_TIMING_METRICS_HEADER,
-                    HeaderValue::from_static("true"),
-                );
-            }
-            let websocket_telemetry = Self::build_websocket_telemetry(otel_manager);
-            let new_conn: ApiWebSocketConnection =
-                ApiWebSocketResponsesClient::new(api_provider, api_auth)
-                    .connect(
-                        headers,
-                        options.turn_state.clone(),
-                        Some(websocket_telemetry),
-                    )
-                    .await?;
+            self.client.clear_preconnected_websocket();
+            let turn_state = options
+                .turn_state
+                .clone()
+                .unwrap_or_else(|| Arc::clone(&self.turn_state));
+            let new_conn = self
+                .client
+                .connect_websocket(
+                    otel_manager,
+                    api_provider,
+                    api_auth,
+                    Some(turn_state),
+                    web_search_eligible,
+                    turn_metadata_header,
+                )
+                .await?;
             self.connection = Some(new_conn);
         }
 
@@ -707,27 +751,13 @@ impl ModelClientSession {
         ))
     }
 
-    /// Adopts the session-level preconnect slot for this turn when headers match.
-    fn try_use_preconnected_websocket(
-        &mut self,
-        web_search_eligible: bool,
-        turn_metadata_header: Option<&str>,
-    ) {
+    /// Adopts the session-level preconnect slot for this turn.
+    fn try_use_preconnected_websocket(&mut self) -> Option<ApiWebSocketConnection> {
         if self.connection.is_some() {
-            return;
+            return None;
         }
 
-        let Some(preconnected) = self
-            .client
-            .take_preconnected_websocket(web_search_eligible, turn_metadata_header)
-        else {
-            return;
-        };
-
-        if let Some(turn_state) = preconnected.turn_state {
-            let _ = self.turn_state.set(turn_state);
-        }
-        self.connection = Some(preconnected.connection);
+        self.client.take_preconnected_websocket()
     }
 
     fn responses_request_compression(&self, auth: Option<&crate::auth::CodexAuth>) -> Compression {
@@ -773,22 +803,17 @@ impl ModelClientSession {
             .as_ref()
             .map(super::auth::AuthManager::unauthorized_recovery);
         loop {
-            let auth = match auth_manager.as_ref() {
-                Some(manager) => manager.auth().await,
-                None => None,
-            };
-            let api_provider = self
-                .client
-                .state
-                .provider
-                .to_api_provider(auth.as_ref().map(CodexAuth::internal_auth_mode))?;
-            let api_auth = auth_provider_from_auth(auth.clone(), &self.client.state.provider)?;
+            let client_setup = self.client.current_client_setup().await?;
             let transport = ReqwestTransport::new(build_reqwest_client());
             let (request_telemetry, sse_telemetry) = Self::build_streaming_telemetry(otel_manager);
-            let compression = self.responses_request_compression(auth.as_ref());
+            let compression = self.responses_request_compression(client_setup.auth.as_ref());
 
-            let client = ApiResponsesClient::new(transport, api_provider, api_auth)
-                .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
+            let client = ApiResponsesClient::new(
+                transport,
+                client_setup.api_provider,
+                client_setup.api_auth,
+            )
+            .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
 
             let options = self.build_responses_options(
                 prompt,
@@ -838,17 +863,8 @@ impl ModelClientSession {
             .as_ref()
             .map(super::auth::AuthManager::unauthorized_recovery);
         loop {
-            let auth = match auth_manager.as_ref() {
-                Some(manager) => manager.auth().await,
-                None => None,
-            };
-            let api_provider = self
-                .client
-                .state
-                .provider
-                .to_api_provider(auth.as_ref().map(CodexAuth::internal_auth_mode))?;
-            let api_auth = auth_provider_from_auth(auth.clone(), &self.client.state.provider)?;
-            let compression = self.responses_request_compression(auth.as_ref());
+            let client_setup = self.client.current_client_setup().await?;
+            let compression = self.responses_request_compression(client_setup.auth.as_ref());
 
             let options = self.build_responses_options(
                 prompt,
@@ -864,8 +880,8 @@ impl ModelClientSession {
             let connection = match self
                 .websocket_connection(
                     otel_manager,
-                    api_provider.clone(),
-                    api_auth.clone(),
+                    client_setup.api_provider,
+                    client_setup.api_auth,
                     web_search_eligible,
                     turn_metadata_header,
                     &options,
@@ -979,13 +995,7 @@ impl ModelClientSession {
 
             self.connection = None;
             self.websocket_last_items.clear();
-            let mut preconnected = self
-                .client
-                .state
-                .preconnected_websocket
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            *preconnected = None;
+            self.client.clear_preconnected_websocket();
         }
         activated
     }
@@ -1008,15 +1018,6 @@ fn build_api_prompt(prompt: &Prompt, instructions: String, tools_json: Vec<Value
 /// metadata with the same sanitization path used when constructing headers.
 fn parse_turn_metadata_header(turn_metadata_header: Option<&str>) -> Option<HeaderValue> {
     turn_metadata_header.and_then(|value| HeaderValue::from_str(value).ok())
-}
-
-/// Normalizes per-turn metadata to a stable string form for cache-key comparison.
-///
-/// The normalization intentionally mirrors [`parse_turn_metadata_header`] so reuse
-/// checks and actual header emission apply identical validity rules.
-fn normalize_turn_metadata_header(turn_metadata_header: Option<&str>) -> Option<String> {
-    parse_turn_metadata_header(turn_metadata_header)
-        .and_then(|value| value.to_str().ok().map(str::to_string))
 }
 
 /// Builds the extra headers attached to Responses API requests.

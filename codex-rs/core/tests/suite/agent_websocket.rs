@@ -82,16 +82,10 @@ async fn websocket_preconnect_happens_on_session_start() -> Result<()> {
     let mut builder = test_codex();
     let test = builder.build_with_websocket_server(&server).await?;
 
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    loop {
-        if server.handshakes().len() == 1 {
-            break;
-        }
-        if tokio::time::Instant::now() >= deadline {
-            panic!("expected websocket preconnect handshake during session startup");
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    assert!(
+        server.wait_for_handshakes(1, Duration::from_secs(2)).await,
+        "expected websocket preconnect handshake during session startup"
+    );
 
     test.submit_turn("hello").await?;
 

@@ -10,6 +10,7 @@ use futures::SinkExt;
 use futures::StreamExt;
 use serde_json::Value;
 use tokio::net::TcpListener;
+use tokio::sync::Notify;
 use tokio::sync::oneshot;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::Request;
@@ -274,6 +275,7 @@ pub struct WebSocketTestServer {
     uri: String,
     connections: Arc<Mutex<Vec<Vec<WebSocketRequest>>>>,
     handshakes: Arc<Mutex<Vec<WebSocketHandshake>>>,
+    handshake_notify: Arc<Notify>,
     shutdown: oneshot::Sender<()>,
     task: tokio::task::JoinHandle<()>,
 }
@@ -297,6 +299,30 @@ impl WebSocketTestServer {
 
     pub fn handshakes(&self) -> Vec<WebSocketHandshake> {
         self.handshakes.lock().unwrap().clone()
+    }
+
+    pub async fn wait_for_handshakes(&self, expected: usize, timeout: Duration) -> bool {
+        if self.handshakes.lock().unwrap().len() >= expected {
+            return true;
+        }
+
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let now = tokio::time::Instant::now();
+            if now >= deadline {
+                return false;
+            }
+            let remaining = deadline.saturating_duration_since(now);
+            if tokio::time::timeout(remaining, self.handshake_notify.notified())
+                .await
+                .is_err()
+            {
+                return false;
+            }
+            if self.handshakes.lock().unwrap().len() >= expected {
+                return true;
+            }
+        }
     }
 
     pub fn single_handshake(&self) -> WebSocketHandshake {
@@ -876,8 +902,10 @@ pub async fn start_websocket_server_with_headers(
     let uri = format!("ws://{addr}");
     let connections_log = Arc::new(Mutex::new(Vec::new()));
     let handshakes_log = Arc::new(Mutex::new(Vec::new()));
+    let handshake_notify = Arc::new(Notify::new());
     let requests = Arc::clone(&connections_log);
     let handshakes = Arc::clone(&handshakes_log);
+    let handshakes_notify = Arc::clone(&handshake_notify);
     let connections = Arc::new(Mutex::new(VecDeque::from(connections)));
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
 
@@ -902,6 +930,7 @@ pub async fn start_websocket_server_with_headers(
 
             let response_headers = connection.response_headers.clone();
             let handshake_log = Arc::clone(&handshakes);
+            let handshake_notify = Arc::clone(&handshakes_notify);
             let callback = move |req: &Request, mut response: Response| {
                 let headers = req
                     .headers()
@@ -917,6 +946,7 @@ pub async fn start_websocket_server_with_headers(
                     .lock()
                     .unwrap()
                     .push(WebSocketHandshake { headers });
+                handshake_notify.notify_waiters();
 
                 let headers_mut = response.headers_mut();
                 for (name, value) in &response_headers {
@@ -974,6 +1004,7 @@ pub async fn start_websocket_server_with_headers(
         uri,
         connections: connections_log,
         handshakes: handshakes_log,
+        handshake_notify,
         shutdown: shutdown_tx,
         task,
     }
