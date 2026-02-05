@@ -150,6 +150,10 @@ pub(crate) struct BottomPane {
     unified_exec_footer: UnifiedExecFooter,
     /// Queued user messages to show above the composer while a turn is running.
     queued_user_messages: QueuedUserMessages,
+    /// Explicit footer override requested by higher-level UI flows.
+    footer_hint_override: Option<Vec<(String, String)>>,
+    /// Count of pending non-editable remote images carried with the draft.
+    pending_non_editable_remote_image_count: usize,
     context_window_percent: Option<i64>,
     context_window_used_tokens: Option<i64>,
 }
@@ -198,6 +202,8 @@ impl BottomPane {
             status: None,
             unified_exec_footer: UnifiedExecFooter::new(),
             queued_user_messages: QueuedUserMessages::new(),
+            footer_hint_override: None,
+            pending_non_editable_remote_image_count: 0,
             esc_backtrack_hint: false,
             animations_enabled,
             context_window_percent: None,
@@ -491,8 +497,32 @@ impl BottomPane {
     }
 
     pub(crate) fn set_footer_hint_override(&mut self, items: Option<Vec<(String, String)>>) {
-        self.composer.set_footer_hint_override(items);
+        self.footer_hint_override = items;
+        self.sync_footer_hint_override();
         self.request_redraw();
+    }
+
+    pub(crate) fn set_pending_non_editable_image_urls(&mut self, urls: Vec<String>) {
+        self.pending_non_editable_remote_image_count = urls.len();
+        self.sync_footer_hint_override();
+        self.request_redraw();
+    }
+
+    fn sync_footer_hint_override(&mut self) {
+        if let Some(items) = self.footer_hint_override.clone() {
+            self.composer.set_footer_hint_override(Some(items));
+            return;
+        }
+        if self.pending_non_editable_remote_image_count == 0 {
+            self.composer.set_footer_hint_override(None);
+            return;
+        }
+        let count = self.pending_non_editable_remote_image_count;
+        let suffix = if count == 1 { "" } else { "s" };
+        self.composer.set_footer_hint_override(Some(vec![(
+            "img".to_string(),
+            format!("{count} remote image{suffix} attached (non-editable)"),
+        )]));
     }
 
     /// Update the status indicator header (defaults to "Working") and details below it.

@@ -2757,9 +2757,7 @@ impl ChatWidget {
                         local_images: self
                             .bottom_pane
                             .take_recent_submission_images_with_placeholders(),
-                        remote_image_urls: std::mem::take(
-                            &mut self.pending_non_editable_image_urls,
-                        ),
+                        remote_image_urls: self.take_pending_non_editable_image_urls(),
                         text_elements,
                         mention_paths: self.bottom_pane.take_mention_paths(),
                     };
@@ -2783,9 +2781,7 @@ impl ChatWidget {
                         local_images: self
                             .bottom_pane
                             .take_recent_submission_images_with_placeholders(),
-                        remote_image_urls: std::mem::take(
-                            &mut self.pending_non_editable_image_urls,
-                        ),
+                        remote_image_urls: self.take_pending_non_editable_image_urls(),
                         text_elements,
                         mention_paths: self.bottom_pane.take_mention_paths(),
                     };
@@ -2810,9 +2806,7 @@ impl ChatWidget {
                         let user_message = UserMessage {
                             text: String::new(),
                             local_images: Vec::new(),
-                            remote_image_urls: std::mem::take(
-                                &mut self.pending_non_editable_image_urls,
-                            ),
+                            remote_image_urls: self.take_pending_non_editable_image_urls(),
                             text_elements: Vec::new(),
                             mention_paths: self.bottom_pane.take_mention_paths(),
                         };
@@ -3178,7 +3172,7 @@ impl ChatWidget {
                     local_images: self
                         .bottom_pane
                         .take_recent_submission_images_with_placeholders(),
-                    remote_image_urls: std::mem::take(&mut self.pending_non_editable_image_urls),
+                    remote_image_urls: self.take_pending_non_editable_image_urls(),
                     text_elements: prepared_elements,
                     mention_paths: self.bottom_pane.take_mention_paths(),
                 };
@@ -6017,7 +6011,16 @@ impl ChatWidget {
     }
 
     pub(crate) fn set_pending_non_editable_image_urls(&mut self, remote_image_urls: Vec<String>) {
-        self.pending_non_editable_image_urls = remote_image_urls;
+        self.pending_non_editable_image_urls = remote_image_urls.clone();
+        self.bottom_pane
+            .set_pending_non_editable_image_urls(remote_image_urls);
+    }
+
+    fn take_pending_non_editable_image_urls(&mut self) -> Vec<String> {
+        let urls = std::mem::take(&mut self.pending_non_editable_image_urls);
+        self.bottom_pane
+            .set_pending_non_editable_image_urls(Vec::new());
+        urls
     }
 
     #[cfg(test)]

@@ -237,6 +237,32 @@ fn build_user_message_lines_with_elements(
     raw_lines
 }
 
+fn inline_data_url_summary(url: &str) -> String {
+    let prefix = url
+        .trim_start_matches("data:")
+        .split_once(',')
+        .map_or_else(|| "image".to_string(), |(meta, _)| meta.to_string());
+    let media_type = prefix.split(';').next().unwrap_or("image");
+    format!("{media_type} data URL ({len} bytes)", len = url.len())
+}
+
+fn remote_image_display_label(index: usize, total: usize) -> String {
+    if total > 1 {
+        format!("[external image {index}] ")
+    } else {
+        "[external image] ".to_string()
+    }
+}
+
+fn remote_image_display_line(url: &str, style: Style, index: usize, total: usize) -> Line<'static> {
+    let label = remote_image_display_label(index, total);
+    if url.starts_with("data:") {
+        Line::from(vec![label.dim(), inline_data_url_summary(url).dim()]).style(style)
+    } else {
+        Line::from(vec![label.dim(), url.to_string().cyan().underlined()]).style(style)
+    }
+}
+
 impl HistoryCell for UserHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let mut lines: Vec<Line<'static>> = Vec::new();
@@ -251,9 +277,15 @@ impl HistoryCell for UserHistoryCell {
         let element_style = style.fg(Color::Cyan);
 
         if !self.remote_image_urls.is_empty() {
+            let total_remote_images = self.remote_image_urls.len();
             let wrapped_remote_images = word_wrap_lines(
-                self.remote_image_urls.iter().map(|url| {
-                    Line::from(vec!["[image url] ".dim(), url.clone().cyan().underlined()])
+                self.remote_image_urls.iter().enumerate().map(|(idx, url)| {
+                    remote_image_display_line(
+                        url,
+                        style,
+                        idx.saturating_add(1),
+                        total_remote_images,
+                    )
                 }),
                 RtOptions::new(usize::from(wrap_width))
                     .wrap_algorithm(textwrap::WrapAlgorithm::FirstFit),
@@ -3368,9 +3400,45 @@ mod tests {
 
         let rendered = render_lines(&cell.display_lines(80)).join("\n");
 
-        assert!(rendered.contains("[image url]"));
+        assert!(rendered.contains("[external image]"));
         assert!(rendered.contains("https://example.com/example.png"));
         assert!(rendered.contains("describe these"));
+    }
+
+    #[test]
+    fn user_history_cell_summarizes_inline_data_urls() {
+        let cell = UserHistoryCell {
+            message: "describe inline image".to_string(),
+            text_elements: Vec::new(),
+            local_image_paths: Vec::new(),
+            remote_image_urls: vec!["data:image/png;base64,abc123".to_string()],
+        };
+
+        let rendered = render_lines(&cell.display_lines(80)).join("\n");
+
+        assert!(rendered.contains("[external image]"));
+        assert!(rendered.contains("image/png data URL"));
+        assert!(rendered.contains("describe inline image"));
+    }
+
+    #[test]
+    fn user_history_cell_numbers_multiple_remote_images() {
+        let cell = UserHistoryCell {
+            message: "describe both".to_string(),
+            text_elements: Vec::new(),
+            local_image_paths: Vec::new(),
+            remote_image_urls: vec![
+                "https://example.com/one.png".to_string(),
+                "https://example.com/two.png".to_string(),
+            ],
+        };
+
+        let rendered = render_lines(&cell.display_lines(80)).join("\n");
+
+        assert!(rendered.contains("[external image 1]"));
+        assert!(rendered.contains("[external image 2]"));
+        assert!(rendered.contains("https://example.com/one.png"));
+        assert!(rendered.contains("https://example.com/two.png"));
     }
 
     #[test]
