@@ -41,6 +41,7 @@ pub struct ResponsesRequestBuilder<'a> {
     store_override: Option<bool>,
     headers: HeaderMap,
     compression: Compression,
+    service_tier: Option<String>,
 }
 
 impl<'a> ResponsesRequestBuilder<'a> {
@@ -108,6 +109,11 @@ impl<'a> ResponsesRequestBuilder<'a> {
         self
     }
 
+    pub fn service_tier(mut self, service_tier: Option<String>) -> Self {
+        self.service_tier = service_tier;
+        self
+    }
+
     pub fn build(self, provider: &Provider) -> Result<ResponsesRequest, ApiError> {
         let model = self
             .model
@@ -137,6 +143,7 @@ impl<'a> ResponsesRequestBuilder<'a> {
             include: self.include,
             prompt_cache_key: self.prompt_cache_key,
             text: self.text,
+            service_tier: self.service_tier,
         };
 
         let mut body = serde_json::to_value(&req)

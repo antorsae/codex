@@ -309,6 +309,10 @@ pub struct Config {
     /// Optional verbosity control for GPT-5 models (Responses API `text.verbosity`).
     pub model_verbosity: Option<Verbosity>,
 
+    /// Optional OpenAI service tier (e.g., "flex" for batch processing).
+    /// See https://platform.openai.com/docs/guides/flex-processing
+    pub service_tier: Option<String>,
+
     /// Base URL for requests to ChatGPT (as opposed to the OpenAI API).
     pub chatgpt_base_url: String,
 
@@ -925,6 +929,10 @@ pub struct ConfigToml {
     pub model_reasoning_summary: Option<ReasoningSummary>,
     /// Optional verbosity control for GPT-5 models (Responses API `text.verbosity`).
     pub model_verbosity: Option<Verbosity>,
+
+    /// Optional OpenAI service tier (e.g., "flex" for batch processing).
+    /// See https://platform.openai.com/docs/guides/flex-processing
+    pub service_tier: Option<String>,
 
     /// Override to force-enable reasoning summaries for the configured model.
     pub model_supports_reasoning_summaries: Option<bool>,
@@ -1667,6 +1675,7 @@ impl Config {
                 .unwrap_or_default(),
             model_supports_reasoning_summaries: cfg.model_supports_reasoning_summaries,
             model_verbosity: config_profile.model_verbosity.or(cfg.model_verbosity),
+            service_tier: cfg.service_tier.clone(),
             chatgpt_base_url: config_profile
                 .chatgpt_base_url
                 .or(cfg.chatgpt_base_url)

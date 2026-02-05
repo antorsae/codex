@@ -103,6 +103,8 @@ struct ModelClientState {
     include_timing_metrics: bool,
     beta_features_header: Option<String>,
     disable_websockets: AtomicBool,
+    /// Optional OpenAI service tier (e.g., "flex" for batch processing).
+    service_tier: Option<String>,
 }
 
 /// A session-scoped client for model-provider API calls.
@@ -169,6 +171,7 @@ impl ModelClient {
         enable_request_compression: bool,
         include_timing_metrics: bool,
         beta_features_header: Option<String>,
+        service_tier: Option<String>,
     ) -> Self {
         Self {
             state: Arc::new(ModelClientState {
@@ -182,6 +185,7 @@ impl ModelClient {
                 include_timing_metrics,
                 beta_features_header,
                 disable_websockets: AtomicBool::new(false),
+                service_tier,
             }),
         }
     }
@@ -406,6 +410,7 @@ impl ModelClientSession {
             ),
             compression,
             turn_state: Some(Arc::clone(&self.turn_state)),
+            service_tier: self.client.state.service_tier.clone(),
         }
     }
 
@@ -442,6 +447,7 @@ impl ModelClientSession {
             prompt_cache_key,
             text,
             store_override,
+            service_tier,
             ..
         } = options;
 
@@ -459,6 +465,7 @@ impl ModelClientSession {
             include: include.clone(),
             prompt_cache_key: prompt_cache_key.clone(),
             text: text.clone(),
+            service_tier: service_tier.clone(),
         };
 
         ResponsesWsRequest::ResponseCreate(payload)

@@ -95,6 +95,7 @@ async fn responses_stream_includes_subagent_header_on_review() {
         false,
         false,
         None,
+        None, // service_tier
     );
     let mut client_session = client.new_session();
 
@@ -197,6 +198,7 @@ async fn responses_stream_includes_subagent_header_on_other() {
         false,
         false,
         None,
+        None, // service_tier
     );
     let mut client_session = client.new_session();
 
@@ -298,6 +300,7 @@ async fn responses_respects_model_info_overrides_from_config() {
         false,
         false,
         None,
+        None, // service_tier
     );
     let mut client_session = client.new_session();
 

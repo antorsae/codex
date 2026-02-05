@@ -462,6 +462,7 @@ async fn websocket_harness_with_runtime_metrics(
         false,
         runtime_metrics_enabled,
         None,
+        None, // service_tier
     );
 
     WebsocketTestHarness {

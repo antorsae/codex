@@ -40,6 +40,7 @@ pub struct ResponsesOptions {
     pub extra_headers: HeaderMap,
     pub compression: Compression,
     pub turn_state: Option<Arc<OnceLock<String>>>,
+    pub service_tier: Option<String>,
 }
 
 impl<T: HttpTransport, A: AuthProvider> ResponsesClient<T, A> {
@@ -93,6 +94,7 @@ impl<T: HttpTransport, A: AuthProvider> ResponsesClient<T, A> {
             extra_headers,
             compression,
             turn_state,
+            service_tier,
         } = options;
 
         let request = ResponsesRequestBuilder::new(model, &prompt.instructions, &prompt.input)
@@ -107,6 +109,7 @@ impl<T: HttpTransport, A: AuthProvider> ResponsesClient<T, A> {
             .store_override(store_override)
             .extra_headers(extra_headers)
             .compression(compression)
+            .service_tier(service_tier)
             .build(self.session.provider())?;
 
         self.stream_request(request, turn_state).await
