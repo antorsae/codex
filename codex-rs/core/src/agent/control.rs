@@ -13,6 +13,7 @@ use crate::thread_manager::ResumeThreadWithHistoryOptions;
 use crate::thread_manager::ThreadManagerState;
 use crate::thread_rollout_truncation::truncate_rollout_to_last_n_fork_turns;
 use codex_features::Feature;
+use codex_login::AuthManager;
 use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
@@ -49,11 +50,12 @@ pub(crate) enum SpawnAgentForkMode {
     LastNTurns(usize),
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub(crate) struct SpawnAgentOptions {
     pub(crate) fork_parent_spawn_call_id: Option<String>,
     pub(crate) fork_mode: Option<SpawnAgentForkMode>,
     pub(crate) environments: Option<Vec<TurnEnvironmentSelection>>,
+    pub(crate) auth_manager: Option<Arc<AuthManager>>,
 }
 
 #[derive(Clone, Debug)]
@@ -239,11 +241,16 @@ impl AgentControl {
                         /*metrics_service_name*/ None,
                         inherited_shell_snapshot,
                         inherited_exec_policy,
+                        options.auth_manager.clone(),
                         options.environments.clone(),
                     )
                     .await?
             }
-            (None, _) => state.spawn_new_thread(config.clone(), self.clone()).await?,
+            (None, _) => {
+                state
+                    .spawn_new_thread(config.clone(), self.clone(), options.auth_manager.clone())
+                    .await?
+            }
         };
         agent_metadata.agent_id = Some(new_thread.thread_id);
         reservation.commit(agent_metadata.clone());
@@ -429,6 +436,7 @@ impl AgentControl {
                 /*persist_extended_history*/ false,
                 inherited_shell_snapshot,
                 inherited_exec_policy,
+                options.auth_manager.clone(),
                 options.environments.clone(),
             )
             .await

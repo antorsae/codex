@@ -82,6 +82,8 @@ impl ToolHandler for Handler {
         }
         apply_spawn_agent_runtime_overrides(&mut config, turn.as_ref())?;
         apply_spawn_agent_overrides(&mut config, child_depth);
+        let auth_manager =
+            Box::pin(spawn_agent_auth_manager(&session, turn.as_ref(), role_name)).await;
 
         let result = Box::pin(
             session.services.agent_control.spawn_agent_with_metadata(
@@ -97,6 +99,7 @@ impl ToolHandler for Handler {
                 SpawnAgentOptions {
                     fork_parent_spawn_call_id: args.fork_context.then(|| call_id.clone()),
                     fork_mode: args.fork_context.then_some(SpawnAgentForkMode::FullHistory),
+                    auth_manager,
                     environments: Some(
                         turn.environments
                             .iter()

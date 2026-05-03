@@ -914,6 +914,7 @@ impl ThreadManagerState {
         &self,
         config: Config,
         agent_control: AgentControl,
+        auth_manager: Option<Arc<AuthManager>>,
     ) -> CodexResult<NewThread> {
         Box::pin(self.spawn_new_thread_with_source(
             config,
@@ -923,6 +924,7 @@ impl ThreadManagerState {
             /*metrics_service_name*/ None,
             /*inherited_shell_snapshot*/ None,
             /*inherited_exec_policy*/ None,
+            auth_manager,
             /*environments*/ None,
         ))
         .await
@@ -938,15 +940,17 @@ impl ThreadManagerState {
         metrics_service_name: Option<String>,
         inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
         inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
+        auth_manager: Option<Arc<AuthManager>>,
         environments: Option<Vec<TurnEnvironmentSelection>>,
     ) -> CodexResult<NewThread> {
         let environments = environments.unwrap_or_else(|| {
             default_thread_environment_selections(self.environment_manager.as_ref(), &config.cwd)
         });
+        let auth_manager = auth_manager.unwrap_or_else(|| Arc::clone(&self.auth_manager));
         Box::pin(self.spawn_thread_with_source(
             config,
             InitialHistory::New,
-            Arc::clone(&self.auth_manager),
+            auth_manager,
             agent_control,
             session_source,
             Vec::new(),
@@ -1003,15 +1007,17 @@ impl ThreadManagerState {
         persist_extended_history: bool,
         inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
         inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
+        auth_manager: Option<Arc<AuthManager>>,
         environments: Option<Vec<TurnEnvironmentSelection>>,
     ) -> CodexResult<NewThread> {
         let environments = environments.unwrap_or_else(|| {
             default_thread_environment_selections(self.environment_manager.as_ref(), &config.cwd)
         });
+        let auth_manager = auth_manager.unwrap_or_else(|| Arc::clone(&self.auth_manager));
         Box::pin(self.spawn_thread_with_source(
             config,
             initial_history,
-            Arc::clone(&self.auth_manager),
+            auth_manager,
             agent_control,
             session_source,
             Vec::new(),

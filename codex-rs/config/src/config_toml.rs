@@ -650,14 +650,21 @@ pub struct AgentsToml {
     /// Whether to record a model-visible message when an agent turn is interrupted.
     /// Defaults to true.
     pub interrupt_message: Option<bool>,
+    /// Optional Codex home whose auth credentials should be used for spawned agents.
+    /// This only affects spawned agents' model authentication; their state still uses the
+    /// active session's Codex home.
+    pub auth_codex_home: Option<AbsolutePathBuf>,
 
     /// User-defined role declarations keyed by role name.
     ///
     /// Example:
     /// ```toml
+    /// auth_codex_home = "~/.codex"
+    ///
     /// [agents.researcher]
     /// description = "Research-focused role."
     /// config_file = "./agents/researcher.toml"
+    /// auth_codex_home = "~/.codex-research"
     /// nickname_candidates = ["Herodotus", "Ibn Battuta"]
     /// ```
     #[serde(default, flatten)]
@@ -674,6 +681,10 @@ pub struct AgentRoleToml {
     /// Path to a role-specific config layer.
     /// Relative paths are resolved relative to the `config.toml` that defines them.
     pub config_file: Option<AbsolutePathBuf>,
+
+    /// Optional Codex home whose auth credentials should be used for agents spawned with this role.
+    /// This only affects spawned agents' model authentication.
+    pub auth_codex_home: Option<AbsolutePathBuf>,
 
     /// Candidate nicknames for agents spawned with this role.
     pub nickname_candidates: Option<Vec<String>>,

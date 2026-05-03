@@ -155,6 +155,7 @@ async fn read_declared_role(
             read_resolved_agent_role_file(fs, &config_file, Some(declared_role_name)).await?;
         role_name = parsed_file.role_name;
         role.description = parsed_file.description.or(role.description);
+        role.auth_codex_home = parsed_file.auth_codex_home.or(role.auth_codex_home);
         role.nickname_candidates = parsed_file.nickname_candidates.or(role.nickname_candidates);
     }
 
@@ -164,6 +165,10 @@ async fn read_declared_role(
 fn merge_missing_role_fields(role: &mut AgentRoleConfig, fallback: &AgentRoleConfig) {
     role.description = role.description.clone().or(fallback.description.clone());
     role.config_file = role.config_file.clone().or(fallback.config_file.clone());
+    role.auth_codex_home = role
+        .auth_codex_home
+        .clone()
+        .or(fallback.auth_codex_home.clone());
     role.nickname_candidates = role
         .nickname_candidates
         .clone()
@@ -210,6 +215,12 @@ async fn agent_role_config_from_toml(
     Ok(AgentRoleConfig {
         description,
         config_file: config_file.map(AbsolutePathBuf::into_path_buf),
+        auth_codex_home: role
+            .auth_codex_home
+            .as_ref()
+            .map(AbsolutePathBuf::from_absolute_path)
+            .transpose()?
+            .map(AbsolutePathBuf::into_path_buf),
         nickname_candidates,
     })
 }
@@ -219,6 +230,7 @@ async fn agent_role_config_from_toml(
 struct RawAgentRoleFileToml {
     name: Option<String>,
     description: Option<String>,
+    auth_codex_home: Option<AbsolutePathBuf>,
     nickname_candidates: Option<Vec<String>>,
     #[serde(flatten)]
     config: ConfigToml,
@@ -228,6 +240,7 @@ struct RawAgentRoleFileToml {
 pub(crate) struct ResolvedAgentRoleFile {
     pub(crate) role_name: String,
     pub(crate) description: Option<String>,
+    pub(crate) auth_codex_home: Option<PathBuf>,
     pub(crate) nickname_candidates: Option<Vec<String>>,
     pub(crate) config: TomlValue,
 }
@@ -304,11 +317,13 @@ pub(crate) fn parse_agent_role_file_contents(
     };
     config_table.remove("name");
     config_table.remove("description");
+    config_table.remove("auth_codex_home");
     config_table.remove("nickname_candidates");
 
     Ok(ResolvedAgentRoleFile {
         role_name,
         description,
+        auth_codex_home: parsed.auth_codex_home.map(AbsolutePathBuf::into_path_buf),
         nickname_candidates,
         config,
     })
@@ -507,6 +522,7 @@ async fn discover_agent_roles_in_dir(
             AgentRoleConfig {
                 description: parsed_file.description,
                 config_file: Some(agent_file.to_path_buf()),
+                auth_codex_home: parsed_file.auth_codex_home,
                 nickname_candidates: parsed_file.nickname_candidates,
             },
         );

@@ -11,9 +11,11 @@ use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::handlers::multi_agents::build_agent_spawn_config;
+use crate::tools::handlers::multi_agents::spawn_agent_auth_manager;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
+use codex_login::AuthManager;
 use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
 use codex_protocol::protocol::AgentStatus;
@@ -87,10 +89,11 @@ struct ReportAgentJobResultToolResult {
     accepted: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct JobRunnerOptions {
     max_concurrency: usize,
     spawn_config: Config,
+    auth_manager: Option<Arc<AuthManager>>,
 }
 
 #[derive(Debug, Clone)]
@@ -262,16 +265,17 @@ mod spawn_agents_on_csv {
             })?;
 
         let requested_concurrency = args.max_concurrency.or(args.max_workers);
-        let options = match build_runner_options(&session, &turn, requested_concurrency).await {
-            Ok(options) => options,
-            Err(err) => {
-                let error_message = err.to_string();
-                let _ = db
-                    .mark_agent_job_failed(job_id.as_str(), error_message.as_str())
-                    .await;
-                return Err(err);
-            }
-        };
+        let options =
+            match Box::pin(build_runner_options(&session, &turn, requested_concurrency)).await {
+                Ok(options) => options,
+                Err(err) => {
+                    let error_message = err.to_string();
+                    let _ = db
+                        .mark_agent_job_failed(job_id.as_str(), error_message.as_str())
+                        .await;
+                    return Err(err);
+                }
+            };
         db.mark_agent_job_running(job_id.as_str())
             .await
             .map_err(|err| {
@@ -458,9 +462,16 @@ async fn build_runner_options(
         normalize_concurrency(requested_concurrency, turn.config.agent_max_threads);
     let base_instructions = session.get_base_instructions().await;
     let spawn_config = build_agent_spawn_config(&base_instructions, turn.as_ref())?;
+    let auth_manager = Box::pin(spawn_agent_auth_manager(
+        session.as_ref(),
+        turn.as_ref(),
+        /*role_name*/ None,
+    ))
+    .await;
     Ok(JobRunnerOptions {
         max_concurrency,
         spawn_config,
+        auth_manager,
     })
 }
 
@@ -541,6 +552,7 @@ async fn run_agent_job_loop(
                             "agent_job:{job_id}"
                         )))),
                         SpawnAgentOptions {
+                            auth_manager: options.auth_manager.clone(),
                             environments: Some(
                                 turn.environments
                                     .iter()

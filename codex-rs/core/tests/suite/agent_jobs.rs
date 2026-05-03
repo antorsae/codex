@@ -11,6 +11,7 @@ use regex_lite::Regex;
 use serde_json::Value;
 use serde_json::json;
 use std::fs;
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
@@ -20,6 +21,8 @@ use wiremock::Respond;
 use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
 use wiremock::matchers::path_regex;
+
+const AGENT_JOBS_TEST_STACK_SIZE_BYTES: usize = 8 * 1024 * 1024;
 
 struct AgentJobsResponder {
     spawn_args_json: String,
@@ -218,8 +221,38 @@ fn parse_simple_csv_line(line: &str) -> Vec<String> {
     line.split(',').map(str::to_string).collect()
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn report_agent_job_result_rejects_wrong_thread() -> Result<()> {
+fn run_agent_jobs_test_on_large_stack<F, Fut>(name: &'static str, test: F) -> Result<()>
+where
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: Future<Output = Result<()>> + Send + 'static,
+{
+    let handle = std::thread::Builder::new()
+        .name(name.to_string())
+        .stack_size(AGENT_JOBS_TEST_STACK_SIZE_BYTES)
+        .spawn(move || -> Result<()> {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .thread_stack_size(AGENT_JOBS_TEST_STACK_SIZE_BYTES)
+                .enable_all()
+                .build()?;
+            runtime.block_on(test())
+        })?;
+
+    match handle.join() {
+        Ok(result) => result,
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
+#[test]
+fn report_agent_job_result_rejects_wrong_thread() -> Result<()> {
+    run_agent_jobs_test_on_large_stack(
+        "report_agent_job_result_rejects_wrong_thread",
+        report_agent_job_result_rejects_wrong_thread_impl,
+    )
+}
+
+async fn report_agent_job_result_rejects_wrong_thread_impl() -> Result<()> {
     let server = start_mock_server().await;
     let mut builder = test_codex().with_config(|config| {
         config
@@ -284,8 +317,15 @@ async fn report_agent_job_result_rejects_wrong_thread() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn spawn_agents_on_csv_runs_and_exports() -> Result<()> {
+#[test]
+fn spawn_agents_on_csv_runs_and_exports() -> Result<()> {
+    run_agent_jobs_test_on_large_stack(
+        "spawn_agents_on_csv_runs_and_exports",
+        spawn_agents_on_csv_runs_and_exports_impl,
+    )
+}
+
+async fn spawn_agents_on_csv_runs_and_exports_impl() -> Result<()> {
     let server = start_mock_server().await;
     let mut builder = test_codex().with_config(|config| {
         config
@@ -326,8 +366,15 @@ async fn spawn_agents_on_csv_runs_and_exports() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn spawn_agents_on_csv_dedupes_item_ids() -> Result<()> {
+#[test]
+fn spawn_agents_on_csv_dedupes_item_ids() -> Result<()> {
+    run_agent_jobs_test_on_large_stack(
+        "spawn_agents_on_csv_dedupes_item_ids",
+        spawn_agents_on_csv_dedupes_item_ids_impl,
+    )
+}
+
+async fn spawn_agents_on_csv_dedupes_item_ids_impl() -> Result<()> {
     let server = start_mock_server().await;
 
     let mut builder = test_codex().with_config(|config| {
@@ -385,8 +432,15 @@ async fn spawn_agents_on_csv_dedupes_item_ids() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn spawn_agents_on_csv_stop_halts_future_items() -> Result<()> {
+#[test]
+fn spawn_agents_on_csv_stop_halts_future_items() -> Result<()> {
+    run_agent_jobs_test_on_large_stack(
+        "spawn_agents_on_csv_stop_halts_future_items",
+        spawn_agents_on_csv_stop_halts_future_items_impl,
+    )
+}
+
+async fn spawn_agents_on_csv_stop_halts_future_items_impl() -> Result<()> {
     let server = start_mock_server().await;
     let mut builder = test_codex().with_config(|config| {
         config

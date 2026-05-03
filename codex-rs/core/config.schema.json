@@ -9,6 +9,14 @@
     "AgentRoleToml": {
       "additionalProperties": false,
       "properties": {
+        "auth_codex_home": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AbsolutePathBuf"
+            }
+          ],
+          "description": "Optional Codex home whose auth credentials should be used for agents spawned with this role. This only affects spawned agents' model authentication."
+        },
         "config_file": {
           "allOf": [
             {
@@ -36,6 +44,14 @@
         "$ref": "#/definitions/AgentRoleToml"
       },
       "properties": {
+        "auth_codex_home": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AbsolutePathBuf"
+            }
+          ],
+          "description": "Optional Codex home whose auth credentials should be used for spawned agents. This only affects spawned agents' model authentication; their state still uses the active session's Codex home."
+        },
         "interrupt_message": {
           "description": "Whether to record a model-visible message when an agent turn is interrupted. Defaults to true.",
           "type": "boolean"

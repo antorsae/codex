@@ -5066,11 +5066,13 @@ async fn load_config_rejects_missing_agent_role_config_file() -> std::io::Result
             max_depth: None,
             job_max_runtime_seconds: None,
             interrupt_message: None,
+            auth_codex_home: None,
             roles: BTreeMap::from([(
                 "researcher".to_string(),
                 AgentRoleToml {
                     description: Some("Research role".to_string()),
                     config_file: Some(missing_path.abs()),
+                    auth_codex_home: None,
                     nickname_candidates: None,
                 },
             )]),
@@ -5213,6 +5215,7 @@ async fn agent_role_file_metadata_overrides_config_toml_metadata() -> std::io::R
         &role_config_path,
         r#"
 description = "Role metadata from file"
+auth_codex_home = "../role-auth"
 nickname_candidates = ["Hypatia"]
 developer_instructions = "Research carefully"
 model = "gpt-5.2"
@@ -5224,6 +5227,7 @@ model = "gpt-5.2"
         r#"[agents.researcher]
 description = "Research role from config"
 config_file = "./agents/researcher.toml"
+auth_codex_home = "./config-auth"
 nickname_candidates = ["Noether"]
 "#,
     )
@@ -5238,8 +5242,13 @@ nickname_candidates = ["Noether"]
         .agent_roles
         .get("researcher")
         .expect("researcher role should load");
+    let expected_auth_home = codex_home.path().join("role-auth");
     assert_eq!(role.description.as_deref(), Some("Role metadata from file"));
     assert_eq!(role.config_file.as_ref(), Some(&role_config_path));
+    assert_eq!(
+        role.auth_codex_home.as_deref(),
+        Some(expected_auth_home.as_path())
+    );
     assert_eq!(
         role.nickname_candidates
             .as_ref()
@@ -6005,6 +6014,36 @@ async fn load_config_resolves_agent_interrupt_message() -> std::io::Result<()> {
 }
 
 #[tokio::test]
+async fn load_config_resolves_agent_auth_codex_home() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    let auth_home = codex_home.path().join("agent-auth");
+    let cfg = ConfigToml {
+        agents: Some(AgentsToml {
+            auth_codex_home: Some(auth_home.abs()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let config = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+
+    assert_eq!(
+        config
+            .agent_auth_codex_home
+            .as_ref()
+            .map(codex_utils_absolute_path::AbsolutePathBuf::as_path),
+        Some(auth_home.as_path())
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn load_config_normalizes_agent_role_nickname_candidates() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     let cfg = ConfigToml {
@@ -6013,11 +6052,13 @@ async fn load_config_normalizes_agent_role_nickname_candidates() -> std::io::Res
             max_depth: None,
             job_max_runtime_seconds: None,
             interrupt_message: None,
+            auth_codex_home: None,
             roles: BTreeMap::from([(
                 "researcher".to_string(),
                 AgentRoleToml {
                     description: Some("Research role".to_string()),
                     config_file: None,
+                    auth_codex_home: None,
                     nickname_candidates: Some(vec![
                         "  Hypatia  ".to_string(),
                         "Noether".to_string(),
@@ -6056,11 +6097,13 @@ async fn load_config_rejects_empty_agent_role_nickname_candidates() -> std::io::
             max_depth: None,
             job_max_runtime_seconds: None,
             interrupt_message: None,
+            auth_codex_home: None,
             roles: BTreeMap::from([(
                 "researcher".to_string(),
                 AgentRoleToml {
                     description: Some("Research role".to_string()),
                     config_file: None,
+                    auth_codex_home: None,
                     nickname_candidates: Some(Vec::new()),
                 },
             )]),
@@ -6093,11 +6136,13 @@ async fn load_config_rejects_duplicate_agent_role_nickname_candidates() -> std::
             max_depth: None,
             job_max_runtime_seconds: None,
             interrupt_message: None,
+            auth_codex_home: None,
             roles: BTreeMap::from([(
                 "researcher".to_string(),
                 AgentRoleToml {
                     description: Some("Research role".to_string()),
                     config_file: None,
+                    auth_codex_home: None,
                     nickname_candidates: Some(vec!["Hypatia".to_string(), " Hypatia ".to_string()]),
                 },
             )]),
@@ -6130,11 +6175,13 @@ async fn load_config_rejects_unsafe_agent_role_nickname_candidates() -> std::io:
             max_depth: None,
             job_max_runtime_seconds: None,
             interrupt_message: None,
+            auth_codex_home: None,
             roles: BTreeMap::from([(
                 "researcher".to_string(),
                 AgentRoleToml {
                     description: Some("Research role".to_string()),
                     config_file: None,
+                    auth_codex_home: None,
                     nickname_candidates: Some(vec!["Agent <One>".to_string()]),
                 },
             )]),
@@ -6384,6 +6431,7 @@ async fn test_precedence_fixture_with_o3_profile() -> std::io::Result<()> {
             memories: MemoriesConfig::default(),
             agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
             agent_interrupt_message_enabled: true,
+            agent_auth_codex_home: None,
             codex_home: fixture.codex_home(),
             sqlite_home: fixture.codex_home().to_path_buf(),
             log_dir: fixture.codex_home().join("log").to_path_buf(),
@@ -6586,6 +6634,7 @@ async fn test_precedence_fixture_with_gpt3_profile() -> std::io::Result<()> {
         memories: MemoriesConfig::default(),
         agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
         agent_interrupt_message_enabled: true,
+        agent_auth_codex_home: None,
         codex_home: fixture.codex_home(),
         sqlite_home: fixture.codex_home().to_path_buf(),
         log_dir: fixture.codex_home().join("log").to_path_buf(),
@@ -6742,6 +6791,7 @@ async fn test_precedence_fixture_with_zdr_profile() -> std::io::Result<()> {
         memories: MemoriesConfig::default(),
         agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
         agent_interrupt_message_enabled: true,
+        agent_auth_codex_home: None,
         codex_home: fixture.codex_home(),
         sqlite_home: fixture.codex_home().to_path_buf(),
         log_dir: fixture.codex_home().join("log").to_path_buf(),
@@ -6883,6 +6933,7 @@ async fn test_precedence_fixture_with_gpt5_profile() -> std::io::Result<()> {
         memories: MemoriesConfig::default(),
         agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
         agent_interrupt_message_enabled: true,
+        agent_auth_codex_home: None,
         codex_home: fixture.codex_home(),
         sqlite_home: fixture.codex_home().to_path_buf(),
         log_dir: fixture.codex_home().join("log").to_path_buf(),

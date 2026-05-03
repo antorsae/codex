@@ -610,6 +610,11 @@ pub struct Config {
     /// Whether to record a model-visible message when an agent turn is interrupted.
     pub agent_interrupt_message_enabled: bool,
 
+    /// Optional Codex home whose auth credentials should be used for spawned agents.
+    /// This only affects model authentication for spawned agents; state, logs, plugins, and skills
+    /// continue to use the spawned agent's own session config.
+    pub agent_auth_codex_home: Option<AbsolutePathBuf>,
+
     /// Maximum nesting depth allowed for spawned agent threads.
     pub agent_max_depth: i32,
 
@@ -1574,6 +1579,8 @@ pub struct AgentRoleConfig {
     pub description: Option<String>,
     /// Path to a role-specific config layer.
     pub config_file: Option<PathBuf>,
+    /// Optional Codex home whose auth credentials should be used for agents spawned with this role.
+    pub auth_codex_home: Option<PathBuf>,
     /// Candidate nicknames for agents spawned with this role.
     pub nickname_candidates: Option<Vec<String>>,
 }
@@ -2959,6 +2966,10 @@ impl Config {
             agent_max_threads,
             agent_max_depth,
             agent_roles,
+            agent_auth_codex_home: cfg
+                .agents
+                .as_ref()
+                .and_then(|agents| agents.auth_codex_home.clone()),
             memories: cfg.memories.unwrap_or_default().into(),
             agent_job_max_runtime_seconds,
             agent_interrupt_message_enabled,

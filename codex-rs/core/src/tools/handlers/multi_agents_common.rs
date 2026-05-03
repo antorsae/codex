@@ -1,4 +1,6 @@
 use crate::agent::AgentStatus;
+use crate::agent::role::DEFAULT_ROLE_NAME;
+use crate::agent::role::resolve_role_config;
 use crate::config::Config;
 use crate::config::DEFAULT_MULTI_AGENT_V2_MIN_WAIT_TIMEOUT_MS;
 use crate::config::MAX_MULTI_AGENT_V2_WAIT_TIMEOUT_MS;
@@ -9,6 +11,8 @@ use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use codex_features::Feature;
+use codex_login::AuthManager;
+use codex_login::AuthManagerConfig;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
@@ -26,6 +30,8 @@ use codex_protocol::user_input::UserInput;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Minimum wait timeout to prevent tight polling loops from burning CPU.
 pub(crate) const MIN_WAIT_TIMEOUT_MS: i64 = DEFAULT_MULTI_AGENT_V2_MIN_WAIT_TIMEOUT_MS;
@@ -283,6 +289,63 @@ pub(crate) fn apply_spawn_agent_overrides(config: &mut Config, child_depth: i32)
         let _ = config.features.disable(Feature::SpawnCsv);
         let _ = config.features.disable(Feature::Collab);
     }
+}
+
+struct SpawnAgentAuthConfig<'a> {
+    config: &'a Config,
+    codex_home: PathBuf,
+}
+
+impl AuthManagerConfig for SpawnAgentAuthConfig<'_> {
+    fn codex_home(&self) -> PathBuf {
+        self.codex_home.clone()
+    }
+
+    fn cli_auth_credentials_store_mode(&self) -> codex_login::AuthCredentialsStoreMode {
+        self.config.cli_auth_credentials_store_mode
+    }
+
+    fn forced_chatgpt_workspace_id(&self) -> Option<String> {
+        self.config.forced_chatgpt_workspace_id.clone()
+    }
+
+    fn chatgpt_base_url(&self) -> String {
+        self.config.chatgpt_base_url.clone()
+    }
+}
+
+pub(crate) async fn spawn_agent_auth_manager(
+    session: &Session,
+    turn: &TurnContext,
+    role_name: Option<&str>,
+) -> Option<Arc<AuthManager>> {
+    let auth_codex_home = configured_spawn_agent_auth_codex_home(turn, role_name)?;
+    let auth_config = SpawnAgentAuthConfig {
+        config: turn.config.as_ref(),
+        codex_home: auth_codex_home,
+    };
+    Some(
+        AuthManager::shared_from_config(
+            &auth_config,
+            session.services.auth_manager.codex_api_key_env_enabled(),
+        )
+        .await,
+    )
+}
+
+fn configured_spawn_agent_auth_codex_home(
+    turn: &TurnContext,
+    role_name: Option<&str>,
+) -> Option<PathBuf> {
+    let role_name = role_name.unwrap_or(DEFAULT_ROLE_NAME);
+    resolve_role_config(turn.config.as_ref(), role_name)
+        .and_then(|role| role.auth_codex_home.clone())
+        .or_else(|| {
+            turn.config
+                .agent_auth_codex_home
+                .as_ref()
+                .map(|codex_home| codex_home.as_path().to_path_buf())
+        })
 }
 
 pub(crate) async fn apply_requested_spawn_agent_model_overrides(
