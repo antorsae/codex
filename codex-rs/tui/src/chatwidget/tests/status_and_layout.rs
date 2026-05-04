@@ -1371,6 +1371,46 @@ async fn status_line_fast_mode_renders_on_and_off() {
 }
 
 #[tokio::test]
+async fn status_line_service_tier_renders_standard_flex_and_fast() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.config.tui_status_line = Some(vec!["service-tier".to_string()]);
+
+    chat.refresh_status_line();
+    assert_eq!(status_line_text(&chat), Some("standard".to_string()));
+
+    chat.set_service_tier(Some(ServiceTier::Flex));
+    chat.refresh_status_line();
+    assert_eq!(status_line_text(&chat), Some("flex".to_string()));
+
+    chat.set_service_tier(Some(ServiceTier::Fast));
+    chat.refresh_status_line();
+    assert_eq!(status_line_text(&chat), Some("fast".to_string()));
+}
+
+#[tokio::test]
+async fn status_line_service_tier_footer_snapshot() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.show_welcome_banner = false;
+    chat.config.tui_status_line = Some(vec!["service-tier".to_string()]);
+    chat.set_service_tier(Some(ServiceTier::Flex));
+    chat.refresh_status_line();
+
+    let width = 80;
+    let height = chat.desired_height(width);
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("create terminal");
+    terminal
+        .draw(|f| chat.render(f.area(), f.buffer_mut()))
+        .expect("draw service-tier footer");
+    assert_chatwidget_snapshot!(
+        "status_line_service_tier_footer",
+        normalized_backend_snapshot(terminal.backend())
+    );
+}
+
+#[tokio::test]
 async fn status_line_fast_mode_footer_snapshot() {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;

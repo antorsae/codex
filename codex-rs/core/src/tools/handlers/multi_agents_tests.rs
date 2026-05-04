@@ -13,6 +13,7 @@ use crate::tools::handlers::multi_agents_v2::SendMessageHandler as SendMessageHa
 use crate::tools::handlers::multi_agents_v2::SpawnAgentHandler as SpawnAgentHandlerV2;
 use crate::tools::handlers::multi_agents_v2::WaitAgentHandler as WaitAgentHandlerV2;
 use crate::turn_diff_tracker::TurnDiffTracker;
+use codex_config::config_toml::AgentServiceTier;
 use codex_features::Feature;
 use codex_login::AuthCredentialsStoreMode;
 use codex_login::AuthManager;
@@ -22,6 +23,7 @@ use codex_model_provider::create_model_provider;
 use codex_model_provider_info::built_in_model_providers;
 use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
+use codex_protocol::config_types::ServiceTier;
 use codex_protocol::config_types::ShellEnvironmentPolicy;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ContentItem;
@@ -124,6 +126,7 @@ model_reasoning_effort = "minimal"
             description: Some("Role with model overrides".to_string()),
             config_file: Some(role_config_path),
             auth_codex_home: None,
+            service_tier: None,
             nickname_candidates: None,
         },
     );
@@ -348,6 +351,98 @@ async fn spawn_agent_uses_configured_agent_auth_codex_home() {
         child_thread.codex.session.codex_home().await,
         parent_codex_home
     );
+}
+
+#[tokio::test]
+async fn spawn_agent_clears_inherited_service_tier_with_global_standard() {
+    #[derive(Debug, Deserialize)]
+    struct SpawnAgentResult {
+        agent_id: String,
+    }
+
+    let (mut session, mut turn) = make_session_and_context().await;
+    let manager = thread_manager();
+    session.services.agent_control = manager.agent_control();
+    let mut config = (*turn.config).clone();
+    config.service_tier = Some(ServiceTier::Flex);
+    config.agent_service_tier = Some(AgentServiceTier::Standard);
+    turn.config = Arc::new(config);
+
+    let output = SpawnAgentHandler
+        .handle(invocation(
+            Arc::new(session),
+            Arc::new(turn),
+            "spawn_agent",
+            function_payload(json!({
+                "message": "inspect this repo"
+            })),
+        ))
+        .await
+        .expect("spawn_agent should succeed");
+    let (content, _) = expect_text_output(output);
+    let result: SpawnAgentResult =
+        serde_json::from_str(&content).expect("spawn_agent result should be json");
+    let agent_id = parse_agent_id(&result.agent_id);
+    let snapshot = manager
+        .get_thread(agent_id)
+        .await
+        .expect("spawned agent thread should exist")
+        .config_snapshot()
+        .await;
+
+    assert_eq!(snapshot.service_tier, None);
+}
+
+#[tokio::test]
+async fn spawn_agent_role_service_tier_overrides_global_service_tier() {
+    #[derive(Debug, Deserialize)]
+    struct SpawnAgentResult {
+        agent_id: String,
+    }
+
+    let (mut session, mut turn) = make_session_and_context().await;
+    let manager = thread_manager();
+    session.services.agent_control = manager.agent_control();
+    let role_name = "standard-worker".to_string();
+    let mut config = (*turn.config).clone();
+    config.service_tier = Some(ServiceTier::Flex);
+    config.agent_service_tier = Some(AgentServiceTier::Fast);
+    config.agent_roles.insert(
+        role_name.clone(),
+        AgentRoleConfig {
+            description: Some("Worker with standard service tier".to_string()),
+            config_file: None,
+            auth_codex_home: None,
+            service_tier: Some(AgentServiceTier::Standard),
+            nickname_candidates: None,
+        },
+    );
+    turn.config = Arc::new(config);
+
+    let output = SpawnAgentHandler
+        .handle(invocation(
+            Arc::new(session),
+            Arc::new(turn),
+            "spawn_agent",
+            function_payload(json!({
+                "message": "inspect this repo",
+                "agent_type": role_name
+            })),
+        ))
+        .await
+        .expect("spawn_agent should succeed");
+    let (content, _) = expect_text_output(output);
+    let result: SpawnAgentResult =
+        serde_json::from_str(&content).expect("spawn_agent result should be json");
+    let agent_id = parse_agent_id(&result.agent_id);
+    let snapshot = manager
+        .get_thread(agent_id)
+        .await
+        .expect("spawned agent thread should exist")
+        .config_snapshot()
+        .await;
+
+    assert_eq!(snapshot.service_tier, None);
 }
 
 #[tokio::test]

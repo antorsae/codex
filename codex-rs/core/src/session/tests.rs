@@ -3161,6 +3161,7 @@ enabled = false
             description: None,
             config_file: Some(role_path.to_path_buf()),
             auth_codex_home: None,
+            service_tier: None,
             nickname_candidates: None,
         },
     );

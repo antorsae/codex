@@ -23,6 +23,7 @@ use codex_config::ResidencyRequirement;
 use codex_config::SandboxModeRequirement;
 use codex_config::Sourced;
 use codex_config::ThreadConfigLoader;
+use codex_config::config_toml::AgentServiceTier;
 use codex_config::config_toml::ConfigLockfileToml;
 use codex_config::config_toml::ConfigToml;
 use codex_config::config_toml::DEFAULT_PROJECT_DOC_MAX_BYTES;
@@ -614,6 +615,10 @@ pub struct Config {
     /// This only affects model authentication for spawned agents; state, logs, plugins, and skills
     /// continue to use the spawned agent's own session config.
     pub agent_auth_codex_home: Option<AbsolutePathBuf>,
+    /// Optional service tier preference for spawned agents.
+    ///
+    /// `standard` clears any service tier inherited from the parent session.
+    pub agent_service_tier: Option<AgentServiceTier>,
 
     /// Maximum nesting depth allowed for spawned agent threads.
     pub agent_max_depth: i32,
@@ -1581,6 +1586,8 @@ pub struct AgentRoleConfig {
     pub config_file: Option<PathBuf>,
     /// Optional Codex home whose auth credentials should be used for agents spawned with this role.
     pub auth_codex_home: Option<PathBuf>,
+    /// Optional service tier preference for agents spawned with this role.
+    pub service_tier: Option<AgentServiceTier>,
     /// Candidate nicknames for agents spawned with this role.
     pub nickname_candidates: Option<Vec<String>>,
 }
@@ -2970,6 +2977,7 @@ impl Config {
                 .agents
                 .as_ref()
                 .and_then(|agents| agents.auth_codex_home.clone()),
+            agent_service_tier: cfg.agents.as_ref().and_then(|agents| agents.service_tier),
             memories: cfg.memories.unwrap_or_default().into(),
             agent_job_max_runtime_seconds,
             agent_interrupt_message_enabled,

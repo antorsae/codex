@@ -80,6 +80,7 @@ impl ToolHandler for Handler {
                 .await
                 .map_err(FunctionCallError::RespondToModel)?;
         }
+        apply_spawn_agent_service_tier_override(&mut config, turn.as_ref(), role_name);
         apply_spawn_agent_runtime_overrides(&mut config, turn.as_ref())?;
         apply_spawn_agent_overrides(&mut config, child_depth);
         let auth_manager =

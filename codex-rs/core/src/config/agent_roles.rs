@@ -169,6 +169,7 @@ fn merge_missing_role_fields(role: &mut AgentRoleConfig, fallback: &AgentRoleCon
         .auth_codex_home
         .clone()
         .or(fallback.auth_codex_home.clone());
+    role.service_tier = role.service_tier.or(fallback.service_tier);
     role.nickname_candidates = role
         .nickname_candidates
         .clone()
@@ -221,6 +222,7 @@ async fn agent_role_config_from_toml(
             .map(AbsolutePathBuf::from_absolute_path)
             .transpose()?
             .map(AbsolutePathBuf::into_path_buf),
+        service_tier: role.service_tier,
         nickname_candidates,
     })
 }
@@ -523,6 +525,7 @@ async fn discover_agent_roles_in_dir(
                 description: parsed_file.description,
                 config_file: Some(agent_file.to_path_buf()),
                 auth_codex_home: parsed_file.auth_codex_home,
+                service_tier: None,
                 nickname_candidates: parsed_file.nickname_candidates,
             },
         );

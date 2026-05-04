@@ -333,6 +333,26 @@ pub(crate) async fn spawn_agent_auth_manager(
     )
 }
 
+pub(crate) fn apply_spawn_agent_service_tier_override(
+    config: &mut Config,
+    turn: &TurnContext,
+    role_name: Option<&str>,
+) {
+    if let Some(service_tier) = configured_spawn_agent_service_tier(turn, role_name) {
+        config.service_tier = service_tier.to_service_tier();
+    }
+}
+
+fn configured_spawn_agent_service_tier(
+    turn: &TurnContext,
+    role_name: Option<&str>,
+) -> Option<codex_config::config_toml::AgentServiceTier> {
+    let role_name = role_name.unwrap_or(DEFAULT_ROLE_NAME);
+    resolve_role_config(turn.config.as_ref(), role_name)
+        .and_then(|role| role.service_tier)
+        .or(turn.config.agent_service_tier)
+}
+
 fn configured_spawn_agent_auth_codex_home(
     turn: &TurnContext,
     role_name: Option<&str>,

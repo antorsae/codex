@@ -67,6 +67,24 @@ const RESERVED_MODEL_PROVIDER_IDS: [&str; 4] = [
 
 pub const DEFAULT_PROJECT_DOC_MAX_BYTES: usize = 32 * 1024;
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentServiceTier {
+    Standard,
+    Fast,
+    Flex,
+}
+
+impl AgentServiceTier {
+    pub fn to_service_tier(self) -> Option<ServiceTier> {
+        match self {
+            AgentServiceTier::Standard => None,
+            AgentServiceTier::Fast => Some(ServiceTier::Fast),
+            AgentServiceTier::Flex => Some(ServiceTier::Flex),
+        }
+    }
+}
+
 const fn default_allow_login_shell() -> Option<bool> {
     Some(true)
 }
@@ -654,17 +672,24 @@ pub struct AgentsToml {
     /// This only affects spawned agents' model authentication; their state still uses the
     /// active session's Codex home.
     pub auth_codex_home: Option<AbsolutePathBuf>,
+    /// Optional service tier preference for spawned agents (`standard`, `fast`, or `flex`).
+    ///
+    /// `standard` clears any service tier inherited from the parent session, so spawned
+    /// agents' model requests omit the `service_tier` field.
+    pub service_tier: Option<AgentServiceTier>,
 
     /// User-defined role declarations keyed by role name.
     ///
     /// Example:
     /// ```toml
     /// auth_codex_home = "~/.codex"
+    /// service_tier = "standard"
     ///
     /// [agents.researcher]
     /// description = "Research-focused role."
     /// config_file = "./agents/researcher.toml"
     /// auth_codex_home = "~/.codex-research"
+    /// service_tier = "flex"
     /// nickname_candidates = ["Herodotus", "Ibn Battuta"]
     /// ```
     #[serde(default, flatten)]
@@ -685,6 +710,11 @@ pub struct AgentRoleToml {
     /// Optional Codex home whose auth credentials should be used for agents spawned with this role.
     /// This only affects spawned agents' model authentication.
     pub auth_codex_home: Option<AbsolutePathBuf>,
+
+    /// Optional service tier preference for agents spawned with this role.
+    ///
+    /// Role-specific values override `[agents].service_tier`.
+    pub service_tier: Option<AgentServiceTier>,
 
     /// Candidate nicknames for agents spawned with this role.
     pub nickname_candidates: Option<Vec<String>>,

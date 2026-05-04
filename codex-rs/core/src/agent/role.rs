@@ -362,6 +362,7 @@ mod built_in {
                         description: Some("Default agent.".to_string()),
                         config_file: None,
                         auth_codex_home: None,
+                        service_tier: None,
                         nickname_candidates: None,
                     }
                 ),
@@ -377,6 +378,7 @@ Rules:
 - Reuse existing explorers for related questions."#.to_string()),
                         config_file: Some("explorer.toml".to_string().parse().unwrap_or_default()),
                         auth_codex_home: None,
+                        service_tier: None,
                         nickname_candidates: None,
                     }
                 ),
@@ -393,6 +395,7 @@ Rules:
 - Always tell workers they are **not alone in the codebase**, and they should not revert the edits made by others, and they should adjust their implementation to accommodate the changes made by others. This is important because there may be multiple workers making changes in parallel, and they need to be aware of each other's work to avoid conflicts and ensure a cohesive final product."#.to_string()),
                         config_file: None,
                         auth_codex_home: None,
+                        service_tier: None,
                         nickname_candidates: None,
                     }
                 ),

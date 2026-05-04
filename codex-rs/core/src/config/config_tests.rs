@@ -5067,12 +5067,14 @@ async fn load_config_rejects_missing_agent_role_config_file() -> std::io::Result
             job_max_runtime_seconds: None,
             interrupt_message: None,
             auth_codex_home: None,
+            service_tier: None,
             roles: BTreeMap::from([(
                 "researcher".to_string(),
                 AgentRoleToml {
                     description: Some("Research role".to_string()),
                     config_file: Some(missing_path.abs()),
                     auth_codex_home: None,
+                    service_tier: None,
                     nickname_candidates: None,
                 },
             )]),
@@ -6044,6 +6046,58 @@ async fn load_config_resolves_agent_auth_codex_home() -> std::io::Result<()> {
 }
 
 #[tokio::test]
+async fn load_config_resolves_agent_service_tier() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    let cfg = ConfigToml {
+        agents: Some(AgentsToml {
+            service_tier: Some(AgentServiceTier::Standard),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let config = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+
+    assert_eq!(config.agent_service_tier, Some(AgentServiceTier::Standard));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn load_config_resolves_agent_role_service_tier_from_toml() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    tokio::fs::write(
+        codex_home.path().join(CONFIG_TOML_FILE),
+        r#"[agents.worker]
+description = "Worker role"
+service_tier = "standard"
+"#,
+    )
+    .await?;
+
+    let config = ConfigBuilder::without_managed_config_for_tests()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(codex_home.path().to_path_buf()))
+        .build()
+        .await?;
+
+    assert_eq!(
+        config
+            .agent_roles
+            .get("worker")
+            .and_then(|role| role.service_tier),
+        Some(AgentServiceTier::Standard)
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn load_config_normalizes_agent_role_nickname_candidates() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     let cfg = ConfigToml {
@@ -6053,12 +6107,14 @@ async fn load_config_normalizes_agent_role_nickname_candidates() -> std::io::Res
             job_max_runtime_seconds: None,
             interrupt_message: None,
             auth_codex_home: None,
+            service_tier: None,
             roles: BTreeMap::from([(
                 "researcher".to_string(),
                 AgentRoleToml {
                     description: Some("Research role".to_string()),
                     config_file: None,
                     auth_codex_home: None,
+                    service_tier: None,
                     nickname_candidates: Some(vec![
                         "  Hypatia  ".to_string(),
                         "Noether".to_string(),
@@ -6098,12 +6154,14 @@ async fn load_config_rejects_empty_agent_role_nickname_candidates() -> std::io::
             job_max_runtime_seconds: None,
             interrupt_message: None,
             auth_codex_home: None,
+            service_tier: None,
             roles: BTreeMap::from([(
                 "researcher".to_string(),
                 AgentRoleToml {
                     description: Some("Research role".to_string()),
                     config_file: None,
                     auth_codex_home: None,
+                    service_tier: None,
                     nickname_candidates: Some(Vec::new()),
                 },
             )]),
@@ -6137,12 +6195,14 @@ async fn load_config_rejects_duplicate_agent_role_nickname_candidates() -> std::
             job_max_runtime_seconds: None,
             interrupt_message: None,
             auth_codex_home: None,
+            service_tier: None,
             roles: BTreeMap::from([(
                 "researcher".to_string(),
                 AgentRoleToml {
                     description: Some("Research role".to_string()),
                     config_file: None,
                     auth_codex_home: None,
+                    service_tier: None,
                     nickname_candidates: Some(vec!["Hypatia".to_string(), " Hypatia ".to_string()]),
                 },
             )]),
@@ -6176,12 +6236,14 @@ async fn load_config_rejects_unsafe_agent_role_nickname_candidates() -> std::io:
             job_max_runtime_seconds: None,
             interrupt_message: None,
             auth_codex_home: None,
+            service_tier: None,
             roles: BTreeMap::from([(
                 "researcher".to_string(),
                 AgentRoleToml {
                     description: Some("Research role".to_string()),
                     config_file: None,
                     auth_codex_home: None,
+                    service_tier: None,
                     nickname_candidates: Some(vec!["Agent <One>".to_string()]),
                 },
             )]),
@@ -6396,6 +6458,7 @@ async fn test_precedence_fixture_with_o3_profile() -> std::io::Result<()> {
             model_context_window: None,
             model_auto_compact_token_limit: None,
             service_tier: None,
+            agent_service_tier: None,
             model_provider_id: "openai".to_string(),
             model_provider: fixture.openai_provider.clone(),
             permissions: Permissions {
@@ -6599,6 +6662,7 @@ async fn test_precedence_fixture_with_gpt3_profile() -> std::io::Result<()> {
         model_context_window: None,
         model_auto_compact_token_limit: None,
         service_tier: None,
+        agent_service_tier: None,
         model_provider_id: "openai-custom".to_string(),
         model_provider: fixture.openai_custom_provider.clone(),
         permissions: Permissions {
@@ -6756,6 +6820,7 @@ async fn test_precedence_fixture_with_zdr_profile() -> std::io::Result<()> {
         model_context_window: None,
         model_auto_compact_token_limit: None,
         service_tier: None,
+        agent_service_tier: None,
         model_provider_id: "openai".to_string(),
         model_provider: fixture.openai_provider.clone(),
         permissions: Permissions {
@@ -6898,6 +6963,7 @@ async fn test_precedence_fixture_with_gpt5_profile() -> std::io::Result<()> {
         model_context_window: None,
         model_auto_compact_token_limit: None,
         service_tier: None,
+        agent_service_tier: None,
         model_provider_id: "openai".to_string(),
         model_provider: fixture.openai_provider.clone(),
         permissions: Permissions {

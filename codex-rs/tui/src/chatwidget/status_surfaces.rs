@@ -564,6 +564,14 @@ impl ChatWidget {
                     "Fast off".to_string()
                 },
             ),
+            StatusLineItem::ServiceTier => {
+                let tier = match self.current_service_tier() {
+                    Some(ServiceTier::Fast) => "fast",
+                    Some(ServiceTier::Flex) => "flex",
+                    None => "standard",
+                };
+                Some(tier.to_string())
+            }
             StatusLineItem::ThreadTitle => self.thread_name.as_ref().and_then(|name| {
                 let trimmed = name.trim();
                 (!trimmed.is_empty()).then(|| trimmed.to_string())
@@ -596,6 +604,7 @@ impl ChatWidget {
             StatusSurfacePreviewItem::TotalOutputTokens => StatusLineItem::TotalOutputTokens,
             StatusSurfacePreviewItem::SessionId => StatusLineItem::SessionId,
             StatusSurfacePreviewItem::FastMode => StatusLineItem::FastMode,
+            StatusSurfacePreviewItem::ServiceTier => StatusLineItem::ServiceTier,
             StatusSurfacePreviewItem::Model => StatusLineItem::ModelName,
             StatusSurfacePreviewItem::ModelWithReasoning => StatusLineItem::ModelWithReasoning,
         };

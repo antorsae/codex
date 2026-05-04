@@ -10,6 +10,7 @@ use crate::session::turn_context::TurnEnvironment;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
+use crate::tools::handlers::multi_agents::apply_spawn_agent_service_tier_override;
 use crate::tools::handlers::multi_agents::build_agent_spawn_config;
 use crate::tools::handlers::multi_agents::spawn_agent_auth_manager;
 use crate::tools::handlers::parse_arguments;
@@ -461,7 +462,12 @@ async fn build_runner_options(
     let max_concurrency =
         normalize_concurrency(requested_concurrency, turn.config.agent_max_threads);
     let base_instructions = session.get_base_instructions().await;
-    let spawn_config = build_agent_spawn_config(&base_instructions, turn.as_ref())?;
+    let mut spawn_config = build_agent_spawn_config(&base_instructions, turn.as_ref())?;
+    apply_spawn_agent_service_tier_override(
+        &mut spawn_config,
+        turn.as_ref(),
+        /*role_name*/ None,
+    );
     let auth_manager = Box::pin(spawn_agent_auth_manager(
         session.as_ref(),
         turn.as_ref(),

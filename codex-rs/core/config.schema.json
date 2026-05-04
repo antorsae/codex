@@ -35,9 +35,25 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "service_tier": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AgentServiceTier"
+            }
+          ],
+          "description": "Optional service tier preference for agents spawned with this role.\n\nRole-specific values override `[agents].service_tier`."
         }
       },
       "type": "object"
+    },
+    "AgentServiceTier": {
+      "enum": [
+        "standard",
+        "fast",
+        "flex"
+      ],
+      "type": "string"
     },
     "AgentsToml": {
       "additionalProperties": {
@@ -73,6 +89,14 @@
           "format": "uint",
           "minimum": 1.0,
           "type": "integer"
+        },
+        "service_tier": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AgentServiceTier"
+            }
+          ],
+          "description": "Optional service tier preference for spawned agents (`standard`, `fast`, or `flex`).\n\n`standard` clears any service tier inherited from the parent session, so spawned agents' model requests omit the `service_tier` field."
         }
       },
       "type": "object"

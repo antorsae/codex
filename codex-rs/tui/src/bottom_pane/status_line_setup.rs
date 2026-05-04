@@ -15,6 +15,7 @@
 //! - Context usage (remaining %, used %, window size)
 //! - Usage limits (5-hour, weekly)
 //! - Session info (thread title, ID, tokens used)
+//! - Runtime mode info (service tier)
 //! - Application version
 
 use ratatui::buffer::Buffer;
@@ -111,6 +112,10 @@ pub(crate) enum StatusLineItem {
     /// Whether Fast mode is currently active.
     FastMode,
 
+    /// Current OpenAI service tier.
+    #[strum(to_string = "service-tier", serialize = "tier")]
+    ServiceTier,
+
     /// Current thread title (if set by user).
     ThreadTitle,
 
@@ -151,6 +156,7 @@ impl StatusLineItem {
                 "Current session identifier (omitted until session starts)"
             }
             StatusLineItem::FastMode => "Whether Fast mode is currently active",
+            StatusLineItem::ServiceTier => "Current OpenAI service tier",
             StatusLineItem::ThreadTitle => "Current thread title (omitted when unavailable)",
             StatusLineItem::TaskProgress => {
                 "Latest task progress from update_plan (omitted until available)"
@@ -177,6 +183,7 @@ impl StatusLineItem {
             StatusLineItem::TotalOutputTokens => StatusSurfacePreviewItem::TotalOutputTokens,
             StatusLineItem::SessionId => StatusSurfacePreviewItem::SessionId,
             StatusLineItem::FastMode => StatusSurfacePreviewItem::FastMode,
+            StatusLineItem::ServiceTier => StatusSurfacePreviewItem::ServiceTier,
             StatusLineItem::ThreadTitle => StatusSurfacePreviewItem::ThreadTitle,
             StatusLineItem::TaskProgress => StatusSurfacePreviewItem::TaskProgress,
         }
@@ -418,6 +425,19 @@ mod tests {
         assert_eq!(
             items,
             Ok(vec![StatusLineItem::Status, StatusLineItem::TaskProgress,])
+        );
+    }
+
+    #[test]
+    fn service_tier_is_canonical_and_accepts_tier_alias() {
+        assert_eq!(StatusLineItem::ServiceTier.to_string(), "service-tier");
+        assert_eq!(
+            "service-tier".parse::<StatusLineItem>(),
+            Ok(StatusLineItem::ServiceTier)
+        );
+        assert_eq!(
+            "tier".parse::<StatusLineItem>(),
+            Ok(StatusLineItem::ServiceTier)
         );
     }
 
