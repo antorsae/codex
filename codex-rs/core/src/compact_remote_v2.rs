@@ -79,6 +79,10 @@ const MAX_RETAINED_AGENT_MESSAGE_TOKENS: i64 = 10_000;
 // retry budget smaller than the general Responses stream retry budget.
 const MAX_REMOTE_COMPACTION_V2_STREAM_RETRIES: u64 = 2;
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Compaction must carry the running turn cancellation token through its existing request boundary"
+)]
 pub(crate) async fn run_inline_remote_auto_compact_task(
     sess: Arc<Session>,
     step_context: Arc<StepContext>,
@@ -87,6 +91,7 @@ pub(crate) async fn run_inline_remote_auto_compact_task(
     initial_context_injection: InitialContextInjection,
     reason: CompactionReason,
     phase: CompactionPhase,
+    cancellation: &CancellationToken,
 ) -> CodexResult<()> {
     let compaction_metadata = CompactionTurnMetadata::new(
         CompactionTrigger::Auto,
@@ -101,6 +106,7 @@ pub(crate) async fn run_inline_remote_auto_compact_task(
         Some(client_session),
         initial_context_injection,
         compaction_metadata,
+        cancellation,
     )
     .await
 }
@@ -108,10 +114,11 @@ pub(crate) async fn run_inline_remote_auto_compact_task(
 pub(crate) async fn run_remote_compact_task(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
+    cancellation: &CancellationToken,
 ) -> CodexResult<()> {
     // Standalone compaction is its own request boundary, so it captures a fresh step.
     let step_context = sess
-        .capture_step_context(Arc::clone(&turn_context), &CancellationToken::new())
+        .capture_step_context(Arc::clone(&turn_context), cancellation)
         .await?;
     let start_event = EventMsg::TurnStarted(TurnStartedEvent {
         turn_id: turn_context.sub_id.clone(),
@@ -135,6 +142,7 @@ pub(crate) async fn run_remote_compact_task(
         /*client_session*/ None,
         InitialContextInjection::DoNotInject,
         compaction_metadata,
+        cancellation,
     )
     .await
 }
@@ -146,6 +154,7 @@ async fn run_remote_compact_task_inner(
     client_session: Option<&mut ModelClientSession>,
     initial_context_injection: InitialContextInjection,
     compaction_metadata: CompactionTurnMetadata,
+    cancellation: &CancellationToken,
 ) -> CodexResult<()> {
     let turn_context = &step_context.turn;
     let trigger = compaction_metadata.trigger();
@@ -189,6 +198,7 @@ async fn run_remote_compact_task_inner(
         initial_context_injection,
         compaction_metadata,
         &mut analytics_details,
+        cancellation,
     )
     .await;
     let status = compaction_status_from_result(&result);
@@ -219,6 +229,10 @@ async fn run_remote_compact_task_inner(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Compaction must carry the running turn cancellation token through its existing request boundary"
+)]
 async fn run_remote_compact_task_inner_impl(
     sess: &Arc<Session>,
     step_context: &Arc<StepContext>,
@@ -227,6 +241,7 @@ async fn run_remote_compact_task_inner_impl(
     initial_context_injection: InitialContextInjection,
     compaction_metadata: CompactionTurnMetadata,
     analytics_details: &mut CompactionAnalyticsDetails,
+    cancellation: &CancellationToken,
 ) -> CodexResult<()> {
     let turn_context = &step_context.turn;
     let context_compaction_item = ContextCompactionItem::new();
@@ -248,6 +263,7 @@ async fn run_remote_compact_task_inner_impl(
         &compaction_trace,
         compaction_metadata,
         analytics_details,
+        cancellation,
     )
     .await;
     let (attempt, compaction_turn_context) = match attempt {
@@ -276,6 +292,7 @@ async fn run_remote_compact_task_inner_impl(
                 &fallback_compaction_trace,
                 compaction_metadata,
                 analytics_details,
+                cancellation,
             )
             .await;
             record_model_fallback(
@@ -374,6 +391,7 @@ async fn run_remote_compaction_request_v2(
     client_session: &mut ModelClientSession,
     prompt: &Prompt,
     responses_metadata: &CodexResponsesMetadata,
+    cancellation: &CancellationToken,
 ) -> CodexResult<RemoteCompactionV2Output> {
     let turn_context = &step_context.turn;
     let max_retries = turn_context
@@ -382,13 +400,12 @@ async fn run_remote_compaction_request_v2(
         .stream_max_retries()
         .min(MAX_REMOTE_COMPACTION_V2_STREAM_RETRIES);
     let mut retry_state = ResponsesStreamRetryState::default();
-    let cancellation = CancellationToken::new();
     crate::account_pools::before_request(
         sess,
         turn_context,
-        &step_context.settings.model_info.slug,
+        &turn_context.model_info().slug,
         client_session,
-        &cancellation,
+        cancellation,
     )
     .await?;
     loop {
@@ -420,9 +437,9 @@ async fn run_remote_compaction_request_v2(
                 if !crate::account_pools::recover(
                     sess,
                     turn_context,
-                    &step_context.settings.model_info.slug,
+                    &turn_context.model_info().slug,
                     client_session,
-                    &cancellation,
+                    cancellation,
                 )
                 .await?
                 {

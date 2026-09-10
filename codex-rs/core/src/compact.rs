@@ -1,5 +1,6 @@
 use crate::context::GuardianContextMode;
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 use std::time::Instant;
 
 use crate::Prompt;
@@ -122,6 +123,7 @@ pub(crate) async fn run_inline_auto_compact_task(
     initial_context_injection: InitialContextInjection,
     reason: CompactionReason,
     phase: CompactionPhase,
+    cancellation: &CancellationToken,
 ) -> CodexResult<()> {
     let prompt = turn_context
         .config
@@ -143,6 +145,7 @@ pub(crate) async fn run_inline_auto_compact_task(
         CompactionTrigger::Auto,
         reason,
         phase,
+        cancellation,
     )
     .await?;
     Ok(())
@@ -152,6 +155,7 @@ pub(crate) async fn run_compact_task(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
     input: Vec<UserInput>,
+    cancellation: &CancellationToken,
 ) -> CodexResult<()> {
     let start_event = EventMsg::TurnStarted(TurnStartedEvent {
         turn_id: turn_context.sub_id.clone(),
@@ -169,11 +173,16 @@ pub(crate) async fn run_compact_task(
         CompactionTrigger::Manual,
         CompactionReason::UserRequested,
         CompactionPhase::StandaloneTurn,
+        cancellation,
     )
     .await?;
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Compaction must carry the running turn cancellation token through its existing request boundary"
+)]
 async fn run_compact_task_inner(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
@@ -182,6 +191,7 @@ async fn run_compact_task_inner(
     trigger: CompactionTrigger,
     reason: CompactionReason,
     phase: CompactionPhase,
+    cancellation: &CancellationToken,
 ) -> CodexResult<()> {
     let compaction_metadata =
         CompactionTurnMetadata::new(trigger, reason, CompactionImplementation::Responses, phase);
@@ -216,6 +226,7 @@ async fn run_compact_task_inner(
         input,
         initial_context_injection,
         compaction_metadata,
+        cancellation,
     )
     .await;
     let status = compaction_status_from_result(&result);
@@ -251,6 +262,7 @@ async fn run_compact_task_inner_impl(
     input: Vec<UserInput>,
     initial_context_injection: InitialContextInjection,
     compaction_metadata: CompactionTurnMetadata,
+    cancellation: &CancellationToken,
 ) -> CodexResult<String> {
     let compaction_item = TurnItem::ContextCompaction(ContextCompactionItem::new());
     sess.emit_turn_item_started(&turn_context, &compaction_item)
@@ -276,13 +288,12 @@ async fn run_compact_task_inner_impl(
         )
         .await;
 
-    let pool_cancellation = tokio_util::sync::CancellationToken::new();
     crate::account_pools::before_request(
         &sess,
         &turn_context,
         &turn_context.model_info().slug,
         &mut client_session,
-        &pool_cancellation,
+        cancellation,
     )
     .await?;
     let compaction_response_id = loop {
@@ -345,7 +356,7 @@ async fn run_compact_task_inner_impl(
                     &turn_context,
                     &turn_context.model_info().slug,
                     &mut client_session,
-                    &pool_cancellation,
+                    cancellation,
                 )
                 .await?
                 {

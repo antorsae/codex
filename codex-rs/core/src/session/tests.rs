@@ -11316,10 +11316,11 @@ async fn legacy_compaction_retains_only_the_selected_step(first_attempt: FirstAt
         Arc::clone(&session),
         Arc::clone(&primary),
         Some(Arc::clone(&fallback)),
-        Arc::new(OnceLock::new()),
+        &mut session.services.model_client.new_session(),
         InitialContextInjection::DoNotInject,
         CompactionReason::ModelDownshift,
         CompactionPhase::PreTurn,
+        &CancellationToken::new(),
     )
     .await
     .expect("compaction succeeds");

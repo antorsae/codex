@@ -13,6 +13,10 @@ use codex_protocol::protocol::EventMsg;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
+#[cfg(test)]
+#[path = "account_pools_tests.rs"]
+mod tests;
+
 pub async fn initialize(
     config: &Config,
     legacy: &AuthManager,
