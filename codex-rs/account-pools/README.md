@@ -29,7 +29,7 @@ TUI has `/accounts` and `/pools` with the corresponding commands. `/usage` shows
 
 ## Recovery policy
 
-The current account remains selected until a model request is blocked. An alternative must have fresh usage, support the current model and have capacity in both the short and weekly windows, including applicable model-specific limits. Candidates rank by remaining quota in the exhausted window; weekly exhaustion takes precedence. Pool order breaks ties.
+The current account remains selected until a model request is blocked. An alternative must have fresh usage, support the current model and have capacity in every applicable window reported by the backend, including model-specific limits. Accounts with only a short or only a weekly ordinary quota window are supported. Candidates rank by remaining quota in the exhausted window; weekly exhaustion takes precedence. Pool order breaks ties.
 
 When all otherwise eligible accounts are weekly exhausted, automatic reset policy chooses the account with the most banked resets and its earliest-expiring usable credit. A short-window block with weekly capacity remaining waits without spending a reset. Failed or incomplete usage reads cannot authorize switching or redemption. Backend window durations, model availability, credit expiry and reset outcomes are authoritative.
 

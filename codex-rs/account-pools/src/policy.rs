@@ -31,14 +31,12 @@ pub(crate) fn known(usage: &ManagedAccountUsage, now: i64) -> bool {
         && (0..=90).contains(&(now - usage.checked_at))
         && usage.ordinary_usage_allowed.is_some()
         && (usage.model.is_none() || usage.model_supported == Some(true))
+        // Some plans expose only one ordinary quota window. Validate the windows
+        // the backend reports instead of requiring both a short and a weekly one.
         && usage
             .windows
             .iter()
-            .any(|window| window.limit_id == "codex" && window.window_minutes <= 24 * 60)
-        && usage
-            .windows
-            .iter()
-            .any(|window| window.limit_id == "codex" && window.window_minutes > 24 * 60)
+            .any(|window| window.limit_id == "codex")
         && usage
             .windows
             .iter()

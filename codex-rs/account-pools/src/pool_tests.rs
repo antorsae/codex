@@ -227,18 +227,51 @@ fn short_exhaustion_with_weekly_capacity_never_spends_a_reset() {
 }
 
 #[test]
+fn single_reported_window_controls_switching_waiting_and_redemption() {
+    let now = 1000;
+    for (trigger, minutes) in [(WindowKind::Short, 300), (WindowKind::Weekly, 10080)] {
+        let mut readings = vec![
+            with_credits(
+                usage("a", /*short*/ 0.0, /*weekly*/ 0.0, now),
+                /*count*/ 1,
+            ),
+            with_credits(
+                usage("b", /*short*/ 70.0, /*weekly*/ 70.0, now),
+                /*count*/ 3,
+            ),
+        ];
+        for reading in &mut readings {
+            reading
+                .windows
+                .retain(|window| window.window_minutes == minutes);
+        }
+        assert_eq!(
+            decide(
+                &readings, /*current*/ 0, trigger, /*redeem_weekly*/ true, now
+            ),
+            Decision::Use(1)
+        );
+        readings[1].windows[0].remaining_percent = 0.0;
+        readings[1].ordinary_usage_allowed = Some(false);
+        assert_eq!(
+            decide(
+                &readings, /*current*/ 0, trigger, /*redeem_weekly*/ true, now
+            ),
+            match trigger {
+                WindowKind::Short => Decision::Wait(PoolWaitReason::ShortWindow, now + 30),
+                WindowKind::Weekly => Decision::Redeem(1, "credit-2".to_owned()),
+            }
+        );
+    }
+}
+
+#[test]
 fn unknown_or_stale_readings_and_missing_windows_never_authorize_redemption() {
     for mutate in [
         |value: &mut ManagedAccountUsage| value.error = Some("offline".to_owned()),
         |value: &mut ManagedAccountUsage| value.ordinary_usage_allowed = None,
         |value: &mut ManagedAccountUsage| value.model_supported = None,
         |value: &mut ManagedAccountUsage| value.windows.clear(),
-        |value: &mut ManagedAccountUsage| {
-            value.windows.remove(0);
-        },
-        |value: &mut ManagedAccountUsage| {
-            value.windows.remove(1);
-        },
         |value: &mut ManagedAccountUsage| value.checked_at = 800,
         |value: &mut ManagedAccountUsage| value.windows[0].remaining_percent = f64::NAN,
     ] {
