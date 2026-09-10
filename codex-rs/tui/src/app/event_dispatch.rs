@@ -70,7 +70,7 @@ impl App {
             AppEvent::ManagedAccounts { args } => self.manage_accounts(app_server, &args),
             AppEvent::ManagedPools { args } => self.manage_pools(app_server, &args),
             AppEvent::ManagedAccountOutput { result } => match result {
-                Ok(report) => self.chat_widget.add_to_history(report),
+                Ok(report) => self.chat_widget.add_account_pool_report(report),
                 Err(message) => self.chat_widget.add_error_message(message),
             },
             AppEvent::ReviewMisalignment(review) => {

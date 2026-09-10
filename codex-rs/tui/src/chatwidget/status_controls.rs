@@ -287,10 +287,23 @@ impl ChatWidget {
         if let Some(thread_id) = self.thread_id {
             copy_targets.push(("Session ID".to_string(), Arc::from(thread_id.to_string())));
         }
-        self.transcript.last_status_copy_targets = Some(super::transcript::StatusCopySource {
-            handle,
-            fields: copy_targets,
-        });
+        self.transcript.last_command_copy_source = Some(
+            super::transcript::CommandCopySource::Status(super::transcript::StatusCopySource {
+                handle,
+                fields: copy_targets,
+            }),
+        );
+    }
+
+    pub(crate) fn add_account_pool_report(
+        &mut self,
+        report: crate::history_cell::AccountPoolReport,
+    ) {
+        self.transcript.last_command_copy_source = Some(
+            super::transcript::CommandCopySource::AccountPool(report.markdown.clone()),
+        );
+        self.add_to_history(report);
+        self.request_redraw();
     }
 
     pub(crate) fn finish_status_rate_limit_refresh(

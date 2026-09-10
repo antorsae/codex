@@ -47,7 +47,7 @@ async fn native_account_pool_controls_and_recovery_snapshot() {
         checked_at: 1_800_000_000,
         error: None,
     };
-    chat.add_to_history(history_cell::AccountPoolReport::accounts(
+    chat.add_account_pool_report(history_cell::AccountPoolReport::accounts(
         &codex_app_server_protocol::ManagedAccountResponse {
             resolved: None,
             models: None,
@@ -98,4 +98,36 @@ async fn native_account_pool_controls_and_recovery_snapshot() {
             plan: Some("pro".to_owned()),
         })
     );
+}
+
+#[tokio::test]
+async fn account_pool_reports_are_copyable_until_the_next_response() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let report =
+        history_cell::AccountPoolReport::pools(&codex_app_server_protocol::ManagedPoolResponse {
+            data: vec![],
+            next_cursor: None,
+            default_selection: None,
+        });
+    let expected = report.markdown.clone();
+    chat.add_account_pool_report(report);
+    drain_insert_history(&mut rx);
+    chat.copy_last_agent_markdown_with(|source| {
+        assert_eq!(source, expected);
+        Ok(None)
+    });
+    drain_insert_history(&mut rx);
+    assert_eq!(chat.transcript.last_agent_markdown, None);
+    chat.dispatch_command(SlashCommand::Copy);
+    assert_chatwidget_snapshot!(
+        "account_pool_report_copy_picker",
+        render_bottom_popup(&chat, /*width*/ 80)
+    );
+    chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    chat.transcript
+        .record_agent_markdown("Next response".to_owned(), "Next response".to_owned());
+    chat.copy_last_agent_markdown_with(|source| {
+        assert_eq!(source, "Next response");
+        Ok(None)
+    });
 }

@@ -287,7 +287,7 @@ impl ChatWidget {
         false
     }
 
-    /// Copy the last response as Markdown with HTML for rich-text destinations.
+    /// Copy the latest account/pool report or response as Markdown with HTML for rich text.
     pub(crate) fn copy_last_agent_markdown(&mut self) {
         self.copy_last_agent_markdown_with(|text| {
             crate::clipboard_copy::copy_to_clipboard(text, CopyFormat::Markdown)
@@ -299,7 +299,15 @@ impl ChatWidget {
         &mut self,
         copy_fn: impl FnOnce(&str) -> Result<Option<crate::clipboard_copy::ClipboardLease>, String>,
     ) {
-        match self.transcript.last_agent_markdown.clone() {
+        let markdown = match &self.transcript.last_command_copy_source {
+            Some(super::transcript::CommandCopySource::AccountPool(markdown)) => {
+                Some(markdown.clone())
+            }
+            Some(super::transcript::CommandCopySource::Status(_)) | None => {
+                self.transcript.last_agent_markdown.clone()
+            }
+        };
+        match markdown {
             Some(markdown) if !markdown.is_empty() => match copy_fn(&markdown) {
                 Ok(lease) => {
                     self.clipboard_lease = lease;
@@ -321,19 +329,28 @@ impl ChatWidget {
 
     pub(super) fn show_copy_picker(&mut self) {
         let mut choices = Vec::new();
-        if let Some(status_targets) = &self.transcript.last_status_copy_targets {
-            choices.push((
-                "Whole status".to_string(),
-                Arc::<str>::from(status_targets.handle.copy_text()),
-                CopyFormat::PlainText,
-            ));
-            choices.extend(
-                status_targets
-                    .fields
-                    .iter()
-                    .cloned()
-                    .map(|(label, text)| (label, text, CopyFormat::PlainText)),
-            );
+        if let Some(source) = &self.transcript.last_command_copy_source {
+            match source {
+                super::transcript::CommandCopySource::AccountPool(markdown) => choices.push((
+                    "Whole report".to_owned(),
+                    Arc::from(markdown.as_str()),
+                    CopyFormat::Markdown,
+                )),
+                super::transcript::CommandCopySource::Status(status_targets) => {
+                    choices.push((
+                        "Whole status".to_string(),
+                        Arc::<str>::from(status_targets.handle.copy_text()),
+                        CopyFormat::PlainText,
+                    ));
+                    choices.extend(
+                        status_targets
+                            .fields
+                            .iter()
+                            .cloned()
+                            .map(|(label, text)| (label, text, CopyFormat::PlainText)),
+                    );
+                }
+            }
         } else if let Some(markdown) = self
             .transcript
             .last_agent_markdown
