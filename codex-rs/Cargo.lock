@@ -2039,6 +2039,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-account-pools"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "codex-backend-client",
+ "codex-config",
+ "codex-http-client",
+ "codex-login",
+ "codex-protocol",
+ "futures",
+ "pretty_assertions",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
 name = "codex-agent-extension"
 version = "0.0.0"
 dependencies = [
