@@ -2046,8 +2046,6 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "codex-backend-client",
- "codex-config",
- "codex-http-client",
  "codex-login",
  "codex-protocol",
  "futures",

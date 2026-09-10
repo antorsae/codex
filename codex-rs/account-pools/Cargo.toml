@@ -28,8 +28,6 @@ uuid = { workspace = true, features = ["v4"] }
 [dev-dependencies]
 base64 = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
-codex-config = { workspace = true }
-codex-http-client = { workspace = true }
 pretty_assertions = { workspace = true }
 schemars = { workspace = true }
 wiremock = { workspace = true }
