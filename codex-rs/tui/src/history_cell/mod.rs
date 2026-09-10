@@ -102,6 +102,7 @@ use url::Url;
 const RAW_DIFF_SUMMARY_WIDTH: usize = 10_000;
 const RAW_TOOL_OUTPUT_WIDTH: usize = 10_000;
 
+mod account_pools;
 mod approvals;
 mod base;
 mod exec;
@@ -118,6 +119,8 @@ mod separators;
 mod session;
 mod startup_warnings;
 
+pub(crate) use account_pools::AccountPoolReport;
+pub(crate) use account_pools::AccountReportView;
 pub(crate) use approvals::*;
 pub(crate) use base::*;
 pub(crate) use exec::*;

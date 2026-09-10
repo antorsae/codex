@@ -47,7 +47,19 @@ async fn native_account_pool_controls_and_recovery_snapshot() {
         checked_at: 1_800_000_000,
         error: None,
     };
-    chat.add_info_message(usage.display_summary(), /*hint*/ None);
+    chat.add_to_history(history_cell::AccountPoolReport::accounts(
+        &codex_app_server_protocol::ManagedAccountResponse {
+            resolved: None,
+            models: None,
+            data: vec![account.clone()],
+            next_cursor: None,
+            usage: vec![usage],
+            login: None,
+            default_selection: None,
+        },
+        history_cell::AccountReportView::Summary,
+        /*now*/ 1_800_000_000,
+    ));
     for event in [
         AccountPoolEvent::Waiting {
             account: "work-a".to_owned(),

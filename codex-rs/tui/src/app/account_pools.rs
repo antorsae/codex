@@ -3,6 +3,8 @@
 use super::App;
 use crate::app_event::AppEvent;
 use crate::app_server_session::AppServerSession;
+use crate::history_cell::AccountPoolReport;
+use crate::history_cell::AccountReportView;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ManagedAccountAction;
 use codex_app_server_protocol::ManagedAccountParams;
@@ -21,7 +23,7 @@ impl App {
             words.pop();
         }
         let (action, alias) = match words.as_slice() {
-            [] | ["list"] => (ManagedAccountAction::List, None),
+            [] | ["list"] => (ManagedAccountAction::Usage, None),
             ["usage"] => (ManagedAccountAction::Usage, None),
             ["usage", alias] => (ManagedAccountAction::Usage, Some((*alias).to_owned())),
             ["add", alias] => (ManagedAccountAction::Add, Some((*alias).to_owned())),
@@ -43,32 +45,48 @@ impl App {
         }
         let handle = server.request_handle();
         let tx = self.app_event_tx.clone();
+        let view = if words.first() == Some(&"usage") {
+            AccountReportView::Usage
+        } else {
+            AccountReportView::Summary
+        };
         tokio::spawn(async move {
             let result = async {
-                let mut lines = Vec::new();
+                let mut data = Vec::new();
+                let mut usage = Vec::new();
                 let mut cursor = None;
                 loop {
-                    let response: ManagedAccountResponse = handle.request_typed(ClientRequest::ManagedAccount {
-                        request_id: RequestId::String(uuid::Uuid::new_v4().to_string()),
-                        params: ManagedAccountParams { action: action.clone(), alias: alias.clone(), account_selection: None, thread_id: None,
-                            device_auth: Some(device_auth), model: None, cursor, limit: Some(100) },
-                    }).await.map_err(|error| error.to_string())?;
-                    if let Some(login) = response.login {
-                        lines.push(serde_json::to_string_pretty(&login).map_err(|error| error.to_string())?);
+                    let mut response: ManagedAccountResponse = handle
+                        .request_typed(ClientRequest::ManagedAccount {
+                            request_id: RequestId::String(uuid::Uuid::new_v4().to_string()),
+                            params: ManagedAccountParams {
+                                action: action.clone(),
+                                alias: alias.clone(),
+                                account_selection: None,
+                                thread_id: None,
+                                device_auth: Some(device_auth),
+                                model: None,
+                                cursor,
+                                limit: Some(100),
+                            },
+                        })
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    data.append(&mut response.data);
+                    usage.append(&mut response.usage);
+                    if action != ManagedAccountAction::Usage || response.next_cursor.is_none() {
+                        response.data = data;
+                        response.usage = usage;
+                        return Ok(AccountPoolReport::accounts(
+                            &response,
+                            view,
+                            chrono::Utc::now().timestamp(),
+                        ));
                     }
-                    for usage in &response.usage { lines.push(usage.display_summary()); }
-                    if response.usage.is_empty() {
-                        lines.extend(response.data.iter().map(|account| format!("{} | {} | {} | workspace {}",
-                            account.alias, account.email.as_deref().unwrap_or("email unknown"),
-                            account.plan.as_deref().unwrap_or("plan unknown"), account.workspace_id)));
-                    }
-                    if !matches!(action, ManagedAccountAction::List | ManagedAccountAction::Usage) || response.next_cursor.is_none() { break; }
                     cursor = response.next_cursor;
                 }
-                if lines.is_empty() { lines.push("No managed accounts. Add one with /accounts add ALIAS or import your login with /accounts import ALIAS.".to_owned()); }
-                lines.push("Account selection changes the default for future sessions.".to_owned());
-                Ok(lines.join("\n"))
-            }.await;
+            }
+            .await;
             tx.send(AppEvent::ManagedAccountOutput { result });
         });
     }
@@ -128,12 +146,11 @@ impl App {
                         .map_err(|error| error.to_string())?;
                     data.extend(response.data);
                     if action != ManagedPoolAction::List || response.next_cursor.is_none() {
-                        return serde_json::to_string_pretty(&ManagedPoolResponse {
+                        return Ok(AccountPoolReport::pools(&ManagedPoolResponse {
                             data,
                             next_cursor: None,
                             default_selection: response.default_selection,
-                        })
-                        .map_err(|error| error.to_string());
+                        }));
                     }
                     cursor = response.next_cursor;
                 }

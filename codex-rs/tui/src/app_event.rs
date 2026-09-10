@@ -268,7 +268,7 @@ pub(crate) enum AppEvent {
         args: String,
     },
     ManagedAccountOutput {
-        result: Result<String, String>,
+        result: Result<crate::history_cell::AccountPoolReport, String>,
     },
     ReviewMisalignment(Arc<crate::chatwidget::MisalignmentReview>),
     ContinueMisalignment(Arc<crate::chatwidget::MisalignmentReview>),
