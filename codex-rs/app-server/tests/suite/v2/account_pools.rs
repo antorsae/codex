@@ -65,11 +65,17 @@ async fn account_pool_management_and_partial_stream_recovery() -> Result<()> {
     let request = server
         .send_request(
             "account/manage",
-            Some(json!({"action":"resolve", "accountSelection":{"type":"account","name":"b"}})),
+            Some(json!({"action":"resolve", "threadId":"bootstrap-selection", "accountSelection":{"type":"account","name":"b"}})),
         )
         .await?;
     let resolved: ManagedAccountResponse = server.read_response(request).await?;
-    assert_eq!(resolved.selected_account, second.data.first().cloned());
+    assert_eq!(
+        (
+            resolved.selected_account.clone(),
+            resolved.selected_pool.clone()
+        ),
+        (second.data.first().cloned(), None)
+    );
     assert!(!serde_json::to_string(&resolved)?.contains("secret-"));
     assert!(matches!(
         resolved.resolved.unwrap().account,
@@ -107,6 +113,29 @@ async fn account_pool_management_and_partial_stream_recovery() -> Result<()> {
             ..Default::default()
         })
         .await?;
+    // A live thread retains its original membership when the user edits its pool or default.
+    let request = server.send_request("pool/manage", Some(json!({
+        "action": "update", "pool": {"name": "work", "accounts": ["b"], "redeemWeeklyResets": false}
+    }))).await?;
+    let _: codex_app_server_protocol::ManagedPoolResponse = server.read_response(request).await?;
+    let request = server
+        .send_request(
+            "account/manage",
+            Some(json!({"action": "select", "alias": "b"})),
+        )
+        .await?;
+    let _: ManagedAccountResponse = server.read_response(request).await?;
+    let request = server
+        .send_request(
+            "account/manage",
+            Some(json!({"action": "resolve", "threadId": thread.thread.id})),
+        )
+        .await?;
+    let resolved: ManagedAccountResponse = server.read_response(request).await?;
+    assert_eq!(
+        (resolved.selected_account, resolved.selected_pool),
+        (first.data.first().cloned(), pools.data.first().cloned())
+    );
     let completed = tokio::time::timeout(
         std::time::Duration::from_secs(40),
         server.start_turn_and_wait_for_completion(TurnStartParams {
@@ -120,6 +149,17 @@ async fn account_pool_management_and_partial_stream_recovery() -> Result<()> {
     )
     .await??;
     assert_eq!(completed.turn.status, TurnStatus::Completed);
+    let request = server
+        .send_request(
+            "account/manage",
+            Some(json!({"action": "resolve", "threadId": thread.thread.id})),
+        )
+        .await?;
+    let resolved: ManagedAccountResponse = server.read_response(request).await?;
+    assert_eq!(
+        (resolved.selected_account, resolved.selected_pool),
+        (second.data.first().cloned(), pools.data.first().cloned())
+    );
     let switched = loop {
         let notification: ThreadAccountPoolNotification = server
             .read_notification("thread/accountPool/updated")
@@ -214,6 +254,27 @@ async fn account_pool_waiting_interrupt_and_explicit_resume_restore_selection() 
             break;
         }
     }
+    let id = server
+        .send_request(
+            "account/manage",
+            Some(json!({"action": "resolve", "threadId": thread.thread.id})),
+        )
+        .await?;
+    let metadata: ManagedAccountResponse = tokio::time::timeout(
+        std::time::Duration::from_secs(/*secs*/ 5),
+        server.read_response(id),
+    )
+    .await??;
+    assert_eq!(
+        (
+            metadata.selected_account.map(|account| account.alias),
+            metadata.selected_pool.map(|pool| pool.accounts)
+        ),
+        (
+            Some("a".to_owned()),
+            Some(vec!["a".to_owned(), "b".to_owned()])
+        )
+    );
     let id = server
         .send_turn_interrupt_request(TurnInterruptParams {
             thread_id: thread.thread.id.clone(),

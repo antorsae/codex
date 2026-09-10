@@ -1,5 +1,6 @@
 use super::*;
 use codex_app_server_protocol::ThreadAccountPoolNotification;
+use codex_protocol::account_pool::AccountPool;
 use codex_protocol::account_pool::AccountPoolEvent;
 use codex_protocol::account_pool::AccountQuotaWindow;
 use codex_protocol::account_pool::ManagedAccount;
@@ -21,8 +22,8 @@ async fn configured_account_footer_and_picker_snapshot() {
             "model-with-reasoning",
             "current-dir",
             "git-branch",
-            "weekly-limit-with-reset",
-            "account-email",
+            "account-weekly",
+            "pool-weekly",
         ]
         .map(str::to_owned)
         .to_vec(),
@@ -36,23 +37,54 @@ async fn configured_account_footer_and_picker_snapshot() {
         email: Some("a@example.com".to_owned()),
         plan: Some("pro".to_owned()),
     });
-    chat.on_rate_limit_snapshot(Some(RateLimitSnapshot {
-        limit_id: None,
-        limit_name: None,
-        normal_model_slug: None,
-        primary: None,
-        secondary: Some(RateLimitWindow {
-            used_percent: 50,
-            window_duration_mins: Some(7 * 24 * 60),
-            // Mid-hour keeps the UI snapshot stable; exact clock boundaries are tested separately.
-            resets_at: Some(Local::now().timestamp() + 6 * 86_400 + 21 * 3600 + 1800),
+    let usages: Vec<_> = [("oa", 14.0, 163), ("ob", 0.0, 103), ("oc", 100.0, 167)]
+        .into_iter()
+        .map(|(alias, remaining_percent, hours)| ManagedAccountUsage {
+            account: ManagedAccount {
+                alias: alias.to_owned(),
+                user_id: format!("user-{alias}"),
+                workspace_id: format!("workspace-{alias}"),
+                email: None,
+                plan: None,
+            },
+            windows: vec![AccountQuotaWindow {
+                limit_id: "codex".to_owned(),
+                model: None,
+                remaining_percent,
+                window_minutes: 7 * 24 * 60,
+                resets_at: Some(Local::now().timestamp() + hours * 3600 + 1800),
+            }],
+            pools: vec!["nano".to_owned()],
+            model: None,
+            model_supported: None,
+            ordinary_usage_allowed: Some(true),
+            available_resets: Some(1),
+            resets: None,
+            checked_at: Local::now().timestamp(),
+            error: None,
+        })
+        .collect();
+    chat.managed_accounts_active = true;
+    chat.initialize_managed_account_status(
+        Some(usages[0].account.clone()),
+        Some(AccountPool {
+            name: "nano".to_owned(),
+            accounts: usages
+                .iter()
+                .map(|usage| usage.account.alias.clone())
+                .collect(),
+            redeem_weekly_resets: true,
         }),
-        credits: None,
-        individual_limit: None,
-        spend_control_reached: None,
-        plan_type: None,
-        rate_limit_reached_type: None,
-    }));
+    );
+    chat.refresh_account_status_if_due();
+    let request_id = loop {
+        if let AppEvent::RefreshAccountStatus { request_id, .. } =
+            events.try_recv().expect("footer refresh")
+        {
+            break request_id;
+        }
+    };
+    chat.finish_account_status(request_id, Ok(usages));
     drain_insert_history(&mut events);
     for width in [140, 80] {
         let mut terminal =
@@ -119,6 +151,7 @@ async fn native_account_pool_controls_and_recovery_snapshot() {
         &codex_app_server_protocol::ManagedAccountResponse {
             resolved: None,
             selected_account: None,
+            selected_pool: None,
             models: None,
             data: vec![account.clone()],
             next_cursor: None,

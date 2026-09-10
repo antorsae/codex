@@ -419,8 +419,10 @@ impl App {
             bootstrap.has_chatgpt_account,
             matches!(bootstrap.auth_mode, Some(TelemetryAuthMode::Chatgpt)),
         );
-        self.chat_widget
-            .initialize_managed_account_status(app_server.selected_managed_account.clone());
+        self.chat_widget.initialize_managed_account_status(
+            app_server.selected_managed_account.clone(),
+            app_server.selected_managed_pool.clone(),
+        );
         if self.chat_widget.has_chatgpt_account() {
             crate::daybreak::prefetch_notice(
                 &self.config,

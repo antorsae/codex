@@ -9565,6 +9565,13 @@ class ManagedAccountResponse(BaseModel):
             description="Identity selected by `resolve` or `models`, without credentials.",
         ),
     ] = None
+    selected_pool: Annotated[
+        AccountPool | None,
+        Field(
+            alias="selectedPool",
+            description="Session pool membership and policy for `resolve` or `models`; null for single accounts.",
+        ),
+    ] = None
     usage: list[ManagedAccountUsage]
 
 

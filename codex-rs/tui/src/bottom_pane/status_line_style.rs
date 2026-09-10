@@ -48,6 +48,8 @@ impl StatusLineAccent {
             | StatusLineItem::EstimatedThreadCost => Self::Usage,
             StatusLineItem::FiveHourLimit
             | StatusLineItem::WeeklyLimit
+            | StatusLineItem::AccountWeekly
+            | StatusLineItem::PoolWeekly
             | StatusLineItem::WeeklyLimitWithReset => Self::Limit,
             StatusLineItem::CodexVersion | StatusLineItem::Hostname | StatusLineItem::SessionId => {
                 Self::Metadata

@@ -21,36 +21,61 @@ impl App {
         server: &AppServerSession,
         request_id: uuid::Uuid,
         account: codex_protocol::account_pool::ManagedAccount,
+        pool: Option<AccountPool>,
     ) {
         let handle = server.request_handle();
         let tx = self.app_event_tx.clone();
         tokio::spawn(async move {
-            let result = tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 30), async {
-                let response: ManagedAccountResponse = handle
-                    .request_typed(ClientRequest::ManagedAccount {
-                        request_id: RequestId::String(request_id.to_string()),
-                        params: ManagedAccountParams {
-                            action: ManagedAccountAction::Usage,
-                            alias: Some(account.alias),
-                            account_selection: None,
-                            thread_id: None,
-                            device_auth: None,
-                            model: None,
-                            cursor: None,
-                            limit: None,
-                        },
-                    })
-                    .await
-                    .map_err(|error| error.to_string())?;
-                response
-                    .usage
-                    .into_iter()
-                    .next()
-                    .ok_or_else(|| "No usage returned for the selected account".to_owned())
-            })
-            .await
-            .map_err(|_| "Account status request timed out".to_owned())
-            .and_then(std::convert::identity);
+            let mut aliases = pool.map(|pool| pool.accounts).unwrap_or_default();
+            if !aliases.contains(&account.alias) {
+                aliases.push(account.alias);
+            }
+            let result = async {
+                let mut usages = Vec::with_capacity(aliases.len());
+                for batch in aliases.chunks(/*chunk_size*/ 32) {
+                    let mut reads = tokio::task::JoinSet::new();
+                    for alias in batch {
+                        let handle = handle.clone();
+                        let alias = alias.clone();
+                        reads.spawn(async move {
+                            tokio::time::timeout(
+                                std::time::Duration::from_secs(/*secs*/ 30),
+                                async {
+                                    let response: ManagedAccountResponse = handle
+                                        .request_typed(ClientRequest::ManagedAccount {
+                                            request_id: RequestId::String(
+                                                uuid::Uuid::new_v4().to_string(),
+                                            ),
+                                            params: ManagedAccountParams {
+                                                action: ManagedAccountAction::Usage,
+                                                alias: Some(alias),
+                                                account_selection: None,
+                                                thread_id: None,
+                                                device_auth: None,
+                                                model: None,
+                                                cursor: None,
+                                                limit: None,
+                                            },
+                                        })
+                                        .await
+                                        .map_err(|error| error.to_string())?;
+                                    response.usage.into_iter().next().ok_or_else(|| {
+                                        "No usage returned for the selected account".to_owned()
+                                    })
+                                },
+                            )
+                            .await
+                            .map_err(|_| "Account status request timed out".to_owned())
+                            .and_then(std::convert::identity)
+                        });
+                    }
+                    while let Some(result) = reads.join_next().await {
+                        usages.push(result.map_err(|error| error.to_string())??);
+                    }
+                }
+                Ok(usages)
+            }
+            .await;
             tx.send(AppEvent::AccountStatusLoaded { request_id, result });
         });
     }

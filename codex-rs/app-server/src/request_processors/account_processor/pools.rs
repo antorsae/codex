@@ -46,19 +46,47 @@ impl AccountRequestProcessor {
         let mut login_response = None;
         let mut resolved = None;
         let mut selected_account = None;
+        let mut selected_pool = None;
         let mut models = None;
         let mut usage = Vec::new();
         let mut imported_alias = None;
         match params.action {
             ManagedAccountAction::Resolve | ManagedAccountAction::Models => {
                 config.account_selection = params.account_selection.clone();
-                if let Some(pool) = codex_core::initialize_account_pool(
-                    &config,
-                    &self.auth_manager,
-                    params.thread_id.as_deref(),
-                )
-                .await?
+                let loaded = match params
+                    .thread_id
+                    .as_deref()
+                    .and_then(|id| codex_protocol::ThreadId::from_string(id).ok())
                 {
+                    Some(id) => self.thread_manager.get_thread(id).await.ok(),
+                    None => None,
+                };
+                let pool = loaded
+                    .as_ref()
+                    .and_then(|thread| {
+                        thread
+                            .thread_extension_data()
+                            .get::<std::sync::Arc<codex_account_pools::PoolSession>>()
+                            .map(|pool| std::sync::Arc::clone(pool.as_ref()))
+                    })
+                    .filter(|pool| {
+                        params
+                            .account_selection
+                            .as_ref()
+                            .is_none_or(|selection| selection == pool.selection())
+                    });
+                let pool = match pool {
+                    Some(pool) => Some(pool),
+                    None => {
+                        codex_core::initialize_account_pool(
+                            &config,
+                            &self.auth_manager,
+                            params.thread_id.as_deref(),
+                        )
+                        .await?
+                    }
+                };
+                if let Some(pool) = pool {
                     let provider = codex_model_provider::create_model_provider(
                         config.model_provider.clone(),
                         Some(pool.auth_manager()),
@@ -70,6 +98,7 @@ impl AccountRequestProcessor {
                     }
                     let state = provider.account_state()?;
                     selected_account = Some(pool.selected_account().await);
+                    selected_pool = pool.pool();
                     resolved = Some(codex_app_server_protocol::GetAccountResponse {
                         account: state.account.map(codex_app_server_protocol::Account::from),
                         requires_openai_auth: state.requires_openai_auth,
@@ -194,6 +223,7 @@ impl AccountRequestProcessor {
         Ok(ManagedAccountResponse {
             resolved,
             selected_account,
+            selected_pool,
             models,
             data,
             next_cursor,

@@ -26,6 +26,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -86,6 +87,8 @@ pub struct PoolSession {
     redeem_weekly: bool,
     waiting: AtomicBool,
     current: Mutex<usize>,
+    // Metadata reads must remain available while recovery holds `current` to wait for quota.
+    selected_index: AtomicUsize,
     denied_until: Mutex<Vec<i64>>,
     selected_auth: Arc<SessionAuth>,
     auth: Arc<AuthManager>,
@@ -179,6 +182,7 @@ impl PoolSession {
             denied_until,
             waiting,
             current: Mutex::new(current),
+            selected_index: AtomicUsize::new(current),
             selected_auth,
             auth,
             recovery_path: RwLock::new(None),
@@ -190,8 +194,11 @@ impl PoolSession {
     }
 
     pub async fn selected_account(&self) -> ManagedAccount {
-        let mut account = self.accounts[*self.current.lock().await].clone();
-        if let Some(auth) = self.auth.auth_cached() {
+        let mut account = self.accounts[self.selected_index.load(Ordering::Acquire)].clone();
+        if let Some(auth) = self.auth.auth_cached().filter(|auth| {
+            auth.get_chatgpt_user_id().as_deref() == Some(&account.user_id)
+                && auth.get_account_id().as_deref() == Some(&account.workspace_id)
+        }) {
             account.email = auth.get_account_email();
             account.plan = auth
                 .account_plan_type()
@@ -207,6 +214,22 @@ impl PoolSession {
 
     pub fn selection(&self) -> &AccountSelection {
         &self.selection
+    }
+
+    /// The pool membership and policy captured when this session was opened.
+    pub fn pool(&self) -> Option<codex_protocol::account_pool::AccountPool> {
+        match &self.selection {
+            AccountSelection::Pool(name) => Some(codex_protocol::account_pool::AccountPool {
+                name: name.clone(),
+                accounts: self
+                    .accounts
+                    .iter()
+                    .map(|account| account.alias.clone())
+                    .collect(),
+                redeem_weekly_resets: self.redeem_weekly,
+            }),
+            AccountSelection::Account(_) => None,
+        }
     }
 
     pub async fn bind_thread(&self, thread_id: &str) -> Result<()> {
@@ -383,6 +406,7 @@ impl PoolSession {
                 .map_err(|_| anyhow::anyhow!("Account selection lock failed"))? = manager;
             self.auth.reload().await;
             *current = index;
+            self.selected_index.store(index, Ordering::Release);
         }
         Ok(())
     }

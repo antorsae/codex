@@ -58,6 +58,9 @@ pub struct ManagedAccountResponse {
     /// Identity selected by `resolve` or `models`, without credentials.
     #[serde(default)]
     pub selected_account: Option<ManagedAccount>,
+    /// Session pool membership and policy for `resolve` or `models`; null for single accounts.
+    #[serde(default)]
+    pub selected_pool: Option<AccountPool>,
     pub models: Option<Vec<super::Model>>,
     pub data: Vec<ManagedAccount>,
     pub next_cursor: Option<String>,

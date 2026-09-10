@@ -68,6 +68,32 @@
         }
       ]
     },
+    "AccountPool": {
+      "properties": {
+        "accounts": {
+          "description": "Ordered aliases. The order breaks quota and reset-credit ties.",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "redeemWeeklyResets": {
+          "description": "Use existing banked credits only when every eligible account is weekly exhausted.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "accounts",
+        "name",
+        "redeemWeeklyResets"
+      ],
+      "type": "object"
+    },
     "AccountQuotaWindow": {
       "properties": {
         "limitId": {
@@ -721,6 +747,18 @@
       ],
       "default": null,
       "description": "Identity selected by `resolve` or `models`, without credentials."
+    },
+    "selectedPool": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AccountPool"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Session pool membership and policy for `resolve` or `models`; null for single accounts."
     },
     "usage": {
       "items": {

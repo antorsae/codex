@@ -70,7 +70,7 @@ async fn account_selection_refreshes_all_quota_and_pool_list_renders_server_data
         plan: Some("pro".to_owned()),
     };
     let request_id = uuid::Uuid::new_v4();
-    app.refresh_account_status(&session, request_id, account.clone());
+    app.refresh_account_status(&session, request_id, account.clone(), /*pool*/ None);
     let AppEvent::AccountStatusLoaded {
         request_id: received_id,
         result,
@@ -78,11 +78,14 @@ async fn account_selection_refreshes_all_quota_and_pool_list_renders_server_data
     else {
         panic!("expected selected account footer usage");
     };
-    let usage = result.map_err(|error| color_eyre::eyre::eyre!("{error}"))?;
+    let usage = result
+        .map_err(|error| color_eyre::eyre::eyre!("{error}"))?
+        .pop()
+        .expect("account usage");
     assert_eq!(
         (
             received_id,
-            usage.account,
+            usage.account.clone(),
             usage
                 .windows
                 .iter()
@@ -107,6 +110,29 @@ async fn account_selection_refreshes_all_quota_and_pool_list_renders_server_data
     let mut expected = ["workspace-a", "workspace-b"].repeat(/*n*/ 3);
     expected.push("workspace-b");
     assert_eq!(identities, expected);
+
+    app.refresh_account_status(
+        &session,
+        uuid::Uuid::new_v4(),
+        usage.account,
+        Some(codex_protocol::account_pool::AccountPool {
+            name: "work".to_owned(),
+            accounts: vec!["a".to_owned(), "b".to_owned()],
+            redeem_weekly_resets: true,
+        }),
+    );
+    let AppEvent::AccountStatusLoaded { result, .. } =
+        events.recv().await.expect("pool footer usage")
+    else {
+        panic!("expected pool footer usage");
+    };
+    let mut aliases: Vec<_> = result
+        .map_err(|error| color_eyre::eyre::eyre!("{error}"))?
+        .into_iter()
+        .map(|usage| usage.account.alias)
+        .collect();
+    aliases.sort();
+    assert_eq!(aliases, ["a", "b"]);
 
     // A successful selection must survive unavailable usage and show its error explicitly.
     backend.reset().await;

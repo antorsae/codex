@@ -669,7 +669,10 @@ See the Codex keymap documentation for supported actions and examples."
         let upgrade_version = crate::updates::get_upgrade_version(&config);
 
         chat_widget.managed_accounts_active = app_server.managed_accounts_active;
-        chat_widget.initialize_managed_account_status(app_server.selected_managed_account.clone());
+        chat_widget.initialize_managed_account_status(
+            app_server.selected_managed_account.clone(),
+            app_server.selected_managed_pool.clone(),
+        );
         let mut app = Self {
             feature_write_lock: Arc::default(),
             model_catalog,

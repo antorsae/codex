@@ -162,6 +162,12 @@ pub(crate) enum StatusLineItem {
 
     /// Email address of the active session's ChatGPT account.
     AccountEmail,
+
+    /// Active account alias, weekly quota and reset countdown.
+    AccountWeekly,
+
+    /// Active pool's summed weekly quota and earliest weekly reset, excluding banked resets.
+    PoolWeekly,
 }
 
 impl StatusLineItem {
@@ -228,6 +234,12 @@ impl StatusLineItem {
             StatusLineItem::AccountEmail => {
                 "Active ChatGPT account email (omitted when unavailable)"
             }
+            StatusLineItem::AccountWeekly => {
+                "Active account alias, weekly quota and reset countdown"
+            }
+            StatusLineItem::PoolWeekly => {
+                "Pool weekly quota sum and earliest reset (excludes banked resets)"
+            }
         }
     }
 
@@ -265,6 +277,8 @@ impl StatusLineItem {
             StatusLineItem::TaskProgress => StatusSurfacePreviewItem::TaskProgress,
             StatusLineItem::WeeklyLimitWithReset => StatusSurfacePreviewItem::WeeklyLimitWithReset,
             StatusLineItem::AccountEmail => StatusSurfacePreviewItem::AccountEmail,
+            StatusLineItem::AccountWeekly => StatusSurfacePreviewItem::AccountWeekly,
+            StatusLineItem::PoolWeekly => StatusSurfacePreviewItem::PoolWeekly,
         }
     }
 }

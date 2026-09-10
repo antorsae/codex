@@ -8,6 +8,88 @@ use pretty_assertions::assert_eq;
 
 const NOW: i64 = 1_800_000_000;
 
+#[test]
+fn pool_weekly_sums_members_until_earliest_reset_including_exhausted_accounts() {
+    let mut usages: Vec<_> = [
+        ("oa", 14.0, 6 * 86_400 + 19 * 3600),
+        ("ob", 0.0, 4 * 86_400 + 7 * 3600),
+        ("oc", 100.0, 6 * 86_400 + 23 * 3600),
+    ]
+    .into_iter()
+    .map(|(alias, remaining, reset)| {
+        let mut value = usage(alias);
+        value.windows[0].remaining_percent = remaining;
+        value.windows[0].resets_at = Some(NOW + reset);
+        // Neither banked resets nor short/model-specific limits enter the weekly sum.
+        value.available_resets = Some(10);
+        value.windows.push(AccountQuotaWindow {
+            window_minutes: 300,
+            remaining_percent: 0.0,
+            resets_at: Some(NOW + 60),
+            ..value.windows[0].clone()
+        });
+        value.windows.push(AccountQuotaWindow {
+            limit_id: "other-model".to_owned(),
+            remaining_percent: 0.0,
+            resets_at: Some(NOW + 120),
+            ..value.windows[0].clone()
+        });
+        value
+    })
+    .collect();
+    let mut status = AccountStatus {
+        account: Some(usages[0].account.clone()),
+        pool: Some(AccountPool {
+            name: "nano".to_owned(),
+            accounts: vec!["oa".to_owned(), "ob".to_owned(), "oc".to_owned()],
+            redeem_weekly_resets: true,
+        }),
+        ..Default::default()
+    };
+    usages.push(usage("outside"));
+    status.record_usage(&usages, NOW);
+    assert_eq!(
+        (status.account_display(NOW), status.pool_display(NOW)),
+        (
+            Some("oa 14% 6d19h".to_owned()),
+            Some("nano 114% 4d7h".to_owned())
+        )
+    );
+    assert_eq!(
+        status.pool_display(NOW + 15 * 60),
+        Some("nano unknown".to_owned())
+    );
+    let mut invalid = vec![usages.clone(); 7];
+    invalid[0][1].error = Some("offline".to_owned());
+    invalid[1][1].windows.clear();
+    invalid[2][1].windows[0].remaining_percent = f64::NAN;
+    invalid[3][1].checked_at = NOW - 15 * 60;
+    invalid[4].remove(1);
+    invalid[5][1].account.user_id = usages[0].account.user_id.clone();
+    invalid[5][1].account.workspace_id = usages[0].account.workspace_id.clone();
+    invalid[6][1].checked_at = NOW + 1;
+    for (failure, values) in invalid.into_iter().enumerate() {
+        status.record_usage(&values, NOW);
+        assert_eq!(
+            (status.account_display(NOW), status.pool_display(NOW)),
+            (
+                Some("oa 14% 6d19h".to_owned()),
+                Some("nano unknown".to_owned())
+            ),
+            "failure {failure}"
+        );
+    }
+    usages[1].windows[0].resets_at = None;
+    status.record_usage(&usages, NOW);
+    assert_eq!(status.pool_display(NOW), Some("nano 114%".to_owned()));
+    usages[1].windows[0].resets_at = Some(NOW - 1);
+    status.record_usage(&usages, NOW);
+    assert_eq!(status.pool_display(NOW), Some("nano 114% due".to_owned()));
+    status.pool = None;
+    status.record_usage(&usages, NOW);
+    assert_eq!(status.pool_display(NOW), None);
+}
+
 fn usage(alias: &str) -> ManagedAccountUsage {
     ManagedAccountUsage {
         account: ManagedAccount {
@@ -89,20 +171,30 @@ fn weekly_countdown_handles_boundaries_unknown_times_and_stale_data() {
 async fn managed_footer_refresh_is_scoped_throttled_and_rejects_previous_account_reads() {
     let (mut chat, _tx, mut events, _ops) = make_chatwidget_manual_with_sender().await;
     chat.managed_accounts_active = true;
-    chat.local_settings.tui.status_line = Some(vec!["weekly-limit-with-reset".to_owned()]);
+    chat.local_settings.tui.status_line =
+        Some(vec!["account-weekly".to_owned(), "pool-weekly".to_owned()]);
     let a = usage("a");
     let mut b = usage("b");
     b.windows[0].remaining_percent = 75.0;
-    chat.initialize_managed_account_status(Some(a.account.clone()));
+    let pool = AccountPool {
+        name: "work".to_owned(),
+        accounts: vec!["a".to_owned(), "b".to_owned()],
+        redeem_weekly_resets: true,
+    };
+    chat.initialize_managed_account_status(Some(a.account.clone()), Some(pool.clone()));
     chat.refresh_account_status_if_due();
     let AppEvent::RefreshAccountStatus {
         request_id: first,
         account,
+        pool: requested_pool,
     } = events.try_recv().unwrap()
     else {
         panic!("expected selected account read");
     };
-    assert_eq!(account, a.account);
+    assert_eq!(
+        (account, requested_pool),
+        (a.account.clone(), Some(pool.clone()))
+    );
     chat.refresh_account_status_if_due();
     assert!(events.try_recv().is_err());
 
@@ -123,14 +215,15 @@ async fn managed_footer_refresh_is_scoped_throttled_and_rejects_previous_account
     let AppEvent::RefreshAccountStatus {
         request_id: second,
         account,
+        pool: requested_pool,
     } = events.try_recv().unwrap()
     else {
         panic!("expected new account read");
     };
-    assert_eq!(account, b.account);
-    chat.finish_account_status(first, Ok(a));
+    assert_eq!((account, requested_pool), (b.account.clone(), Some(pool)));
+    chat.finish_account_status(first, Ok(vec![a]));
     assert_eq!(chat.account_status.weekly_display(NOW), None);
-    chat.finish_account_status(second, Ok(b.clone()));
+    chat.finish_account_status(second, Ok(vec![b.clone()]));
     assert_eq!(
         chat.account_status.weekly_display(NOW),
         Some("75% 6d21h".to_owned())
@@ -144,7 +237,7 @@ async fn managed_footer_refresh_is_scoped_throttled_and_rejects_previous_account
         panic!("expected next scheduled read");
     };
     b.error = Some("usage unavailable".to_owned());
-    chat.finish_account_status(request_id, Ok(b));
+    chat.finish_account_status(request_id, Ok(vec![b]));
     assert_eq!(chat.account_status.weekly_display(NOW), None);
     assert_eq!(chat.rate_limit_refresh_interval(), None);
 }

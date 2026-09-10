@@ -14569,6 +14569,18 @@
             "default": null,
             "description": "Identity selected by `resolve` or `models`, without credentials."
           },
+          "selectedPool": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/AccountPool"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Session pool membership and policy for `resolve` or `models`; null for single accounts."
+          },
           "usage": {
             "items": {
               "$ref": "#/definitions/v2/ManagedAccountUsage"
