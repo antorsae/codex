@@ -10,8 +10,10 @@ use codex_protocol::account_pool::PoolWaitReason;
 async fn native_account_pool_controls_and_recovery_snapshot() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.dispatch_command(SlashCommand::Accounts);
+    assert_matches!(rx.try_recv(), Ok(AppEvent::InsertHistoryCell(_)));
     assert_matches!(rx.try_recv(), Ok(AppEvent::ManagedAccounts { args }) if args.is_empty());
     chat.dispatch_command(SlashCommand::Pools);
+    assert_matches!(rx.try_recv(), Ok(AppEvent::InsertHistoryCell(_)));
     assert_matches!(rx.try_recv(), Ok(AppEvent::ManagedPools { args }) if args.is_empty());
     let account = ManagedAccount {
         alias: "work-b".to_owned(),
@@ -90,6 +92,7 @@ async fn native_account_pool_controls_and_recovery_snapshot() {
     );
     assert!(chat.managed_accounts_active);
     chat.dispatch_command(SlashCommand::Usage);
+    assert_matches!(rx.try_recv(), Ok(AppEvent::InsertHistoryCell(_)));
     assert_matches!(rx.try_recv(), Ok(AppEvent::ManagedAccounts { args }) if args == "usage");
     assert_eq!(
         chat.status_account_display,
@@ -97,6 +100,57 @@ async fn native_account_pool_controls_and_recovery_snapshot() {
             email: Some("b@example.com".to_owned()),
             plan: Some("pro".to_owned()),
         })
+    );
+}
+
+#[tokio::test]
+async fn account_pool_commands_stay_visible_and_recallable_without_starting_a_turn() {
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.managed_accounts_active = true;
+    chat.has_chatgpt_account = true;
+    let mut history = Vec::new();
+    for command in [
+        "/accounts",
+        "/accounts select oc",
+        "/pools",
+        "/pools select work",
+        "/usage",
+    ] {
+        chat.bottom_pane
+            .set_composer_text(command.to_owned(), Vec::new(), Vec::new());
+        chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let AppEvent::InsertHistoryCell(cell) = rx.try_recv().expect("command echo") else {
+            panic!("expected the submitted command before its request");
+        };
+        history.extend(cell.display_lines(/*width*/ 80));
+        assert_eq!(crate::app_backtrack::user_count(&[Arc::from(cell)]), 0);
+        // The echo is local transcript output; the command still follows its usual RPC route.
+        let expected_args = command.split_once(' ').map_or("", |(_, args)| args);
+        match rx.try_recv().expect("account or pool request") {
+            AppEvent::ManagedAccounts { args } => {
+                assert_eq!(
+                    args,
+                    if command == "/usage" {
+                        "usage"
+                    } else {
+                        expected_args
+                    }
+                );
+            }
+            AppEvent::ManagedPools { args } => assert_eq!(args, expected_args),
+            event => panic!("unexpected event: {event:?}"),
+        }
+        assert_eq!(chat.bottom_pane.composer_text(), "");
+        chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(chat.bottom_pane.composer_text(), command);
+        while rx.try_recv().is_ok() {}
+        assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
+    }
+    assert_chatwidget_snapshot!(
+        "account_pool_command_history",
+        lines_to_single_string(&history)
     );
 }
 

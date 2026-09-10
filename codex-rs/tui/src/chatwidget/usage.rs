@@ -16,6 +16,7 @@ const RATE_LIMIT_RESET_CONFIRMATION_VIEW_ID: &str = "rate-limit-reset-confirmati
 impl ChatWidget {
     pub(super) fn open_usage_menu(&mut self) {
         if self.managed_accounts_active {
+            self.add_account_pool_command(SlashCommand::Usage, "");
             self.app_event_tx.send(AppEvent::ManagedAccounts {
                 args: "usage".to_owned(),
             });

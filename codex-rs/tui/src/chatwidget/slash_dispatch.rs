@@ -506,12 +506,18 @@ impl ChatWidget {
                     self.open_usage_menu();
                 }
             }
-            SlashCommand::Accounts => self.app_event_tx.send(AppEvent::ManagedAccounts {
-                args: String::new(),
-            }),
-            SlashCommand::Pools => self.app_event_tx.send(AppEvent::ManagedPools {
-                args: String::new(),
-            }),
+            SlashCommand::Accounts => {
+                self.add_account_pool_command(cmd, "");
+                self.app_event_tx.send(AppEvent::ManagedAccounts {
+                    args: String::new(),
+                });
+            }
+            SlashCommand::Pools => {
+                self.add_account_pool_command(cmd, "");
+                self.app_event_tx.send(AppEvent::ManagedPools {
+                    args: String::new(),
+                });
+            }
             SlashCommand::Ide => {
                 self.handle_ide_command();
             }
@@ -763,8 +769,14 @@ impl ChatWidget {
                     }
                 }
             }
-            SlashCommand::Accounts => self.app_event_tx.send(AppEvent::ManagedAccounts { args }),
-            SlashCommand::Pools => self.app_event_tx.send(AppEvent::ManagedPools { args }),
+            SlashCommand::Accounts => {
+                self.add_account_pool_command(cmd, &args);
+                self.app_event_tx.send(AppEvent::ManagedAccounts { args });
+            }
+            SlashCommand::Pools => {
+                self.add_account_pool_command(cmd, &args);
+                self.app_event_tx.send(AppEvent::ManagedPools { args });
+            }
             SlashCommand::Ide => {
                 self.handle_ide_command_args(trimmed);
             }

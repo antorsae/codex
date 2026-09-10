@@ -295,6 +295,17 @@ impl ChatWidget {
         );
     }
 
+    /// Keep local commands visible without counting them as model turns for backtracking.
+    pub(super) fn add_account_pool_command(&mut self, command: SlashCommand, args: &str) {
+        let command = format!("/{} {}", command.command(), args.trim());
+        self.add_to_history(history_cell::PrefixedWrappedHistoryCell::new(
+            history_cell::sanitize_user_text(command.trim_end().into()).into_owned(),
+            "› ".cyan(),
+            "  ",
+        ));
+        self.request_redraw();
+    }
+
     pub(crate) fn add_account_pool_report(
         &mut self,
         report: crate::history_cell::AccountPoolReport,

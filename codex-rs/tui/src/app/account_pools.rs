@@ -22,7 +22,7 @@ impl App {
         if device_auth {
             words.pop();
         }
-        let (action, alias) = match words.as_slice() {
+        let (mut action, mut alias) = match words.as_slice() {
             [] | ["list"] => (ManagedAccountAction::Usage, None),
             ["usage"] => (ManagedAccountAction::Usage, None),
             ["usage", alias] => (ManagedAccountAction::Usage, Some((*alias).to_owned())),
@@ -55,6 +55,7 @@ impl App {
                 let mut data = Vec::new();
                 let mut usage = Vec::new();
                 let mut cursor = None;
+                let mut selection_updated = false;
                 loop {
                     let mut response: ManagedAccountResponse = handle
                         .request_typed(ClientRequest::ManagedAccount {
@@ -71,7 +72,22 @@ impl App {
                             },
                         })
                         .await
-                        .map_err(|error| error.to_string())?;
+                        .map_err(|error| {
+                            if selection_updated {
+                                format!("Default account updated, but usage could not be refreshed: {error}. Run /accounts to retry.")
+                            } else {
+                                error.to_string()
+                            }
+                        })?;
+                    if action == ManagedAccountAction::Select {
+                        // Selection returns metadata for the selected alias. Read all accounts'
+                        // usage next; pagination must never repeat the selection mutation.
+                        action = ManagedAccountAction::Usage;
+                        alias = None;
+                        cursor = None;
+                        selection_updated = true;
+                        continue;
+                    }
                     data.append(&mut response.data);
                     usage.append(&mut response.usage);
                     if action != ManagedAccountAction::Usage || response.next_cursor.is_none() {
