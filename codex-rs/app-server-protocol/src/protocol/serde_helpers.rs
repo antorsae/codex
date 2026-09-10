@@ -38,3 +38,21 @@ where
 {
     serde_with::rust::double_option::serialize(value, serializer)
 }
+
+/// Embed an existing RPC response without registering a second, untitled root definition.
+#[cfg(test)]
+pub(crate) fn nullable_embedded_response_schema<T: schemars::JsonSchema>(
+    generator: &mut schemars::r#gen::SchemaGenerator,
+) -> schemars::schema::Schema {
+    schemars::schema::SchemaObject {
+        subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
+            any_of: Some(vec![
+                T::json_schema(generator),
+                <() as schemars::JsonSchema>::json_schema(generator),
+            ]),
+            ..Default::default()
+        })),
+        ..Default::default()
+    }
+    .into()
+}

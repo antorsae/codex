@@ -13,6 +13,7 @@ use codex_login::login_with_bedrock_access_keys;
 use codex_model_provider::is_supported_amazon_bedrock_region;
 
 mod bedrock_setup;
+mod pools;
 mod rate_limit_resets;
 
 // Duration before a browser ChatGPT login attempt is abandoned.
@@ -28,6 +29,11 @@ const LOGIN_ISSUER_OVERRIDE_ENV_VAR: &str = "CODEX_APP_SERVER_LOGIN_ISSUER";
 const LOGIN_OPEN_APP_URL_OVERRIDE_ENV_VAR: &str = "CODEX_APP_SERVER_DEV_OPEN_APP_URL";
 
 enum ActiveLogin {
+    Managed {
+        cancel: CancellationToken,
+        shutdown_handle: Option<ShutdownHandle>,
+        login_id: Uuid,
+    },
     Browser {
         shutdown_handle: ShutdownHandle,
         login_id: Uuid,
@@ -41,14 +47,24 @@ enum ActiveLogin {
 impl ActiveLogin {
     fn login_id(&self) -> Uuid {
         match self {
-            ActiveLogin::Browser { login_id, .. } | ActiveLogin::DeviceCode { login_id, .. } => {
-                *login_id
-            }
+            ActiveLogin::Managed { login_id, .. }
+            | ActiveLogin::Browser { login_id, .. }
+            | ActiveLogin::DeviceCode { login_id, .. } => *login_id,
         }
     }
 
     fn cancel(&self) {
         match self {
+            ActiveLogin::Managed {
+                cancel,
+                shutdown_handle,
+                ..
+            } => {
+                cancel.cancel();
+                if let Some(handle) = shutdown_handle {
+                    handle.shutdown();
+                }
+            }
             ActiveLogin::Browser {
                 shutdown_handle, ..
             } => shutdown_handle.shutdown(),

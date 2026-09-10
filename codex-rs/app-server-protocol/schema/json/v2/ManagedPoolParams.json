@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AccountPool": {
+      "properties": {
+        "accounts": {
+          "description": "Ordered aliases. The order breaks quota and reset-credit ties.",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "redeemWeeklyResets": {
+          "description": "Use existing banked credits only when every eligible account is weekly exhausted.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "accounts",
+        "name",
+        "redeemWeeklyResets"
+      ],
+      "type": "object"
+    },
+    "ManagedPoolAction": {
+      "enum": [
+        "create",
+        "list",
+        "read",
+        "update",
+        "select",
+        "remove"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "action": {
+      "$ref": "#/definitions/ManagedPoolAction"
+    },
+    "cursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "limit": {
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "pool": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AccountPool"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "action"
+  ],
+  "title": "ManagedPoolParams",
+  "type": "object"
+}

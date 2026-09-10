@@ -1128,6 +1128,7 @@ impl ThreadRequestProcessor {
         request_context: RequestContext,
     ) -> Result<(), JSONRPCErrorError> {
         let ThreadStartParams {
+            account_selection,
             model,
             model_provider,
             allow_provider_model_fallback,
@@ -1205,6 +1206,7 @@ impl ThreadRequestProcessor {
             personality,
         );
         typesafe_overrides.ephemeral = ephemeral;
+        typesafe_overrides.account_selection = account_selection;
         let listener_task_context = ListenerTaskContext {
             thread_manager: Arc::clone(&self.thread_manager),
             thread_state_manager: self.thread_state_manager.clone(),
@@ -3668,6 +3670,7 @@ impl ThreadRequestProcessor {
         };
 
         let ThreadResumeParams {
+            account_selection,
             thread_id,
             history,
             path,
@@ -3819,6 +3822,7 @@ impl ThreadRequestProcessor {
             developer_instructions,
             personality,
         );
+        typesafe_overrides.account_selection = account_selection;
         if typesafe_overrides.approval_policy.is_none()
             && let Some(value) = request_overrides
                 .as_mut()
@@ -4219,6 +4223,13 @@ impl ThreadRequestProcessor {
         };
 
         if let Some((existing_thread_id, existing_thread, mut source_thread)) = running_thread {
+            if let Some(selection) = &params.account_selection
+                && existing_thread.config().await.account_selection.as_ref() != Some(selection)
+            {
+                return Err(invalid_request(
+                    "An active thread's account selection cannot change; unload it before resuming with a different selection",
+                ));
+            }
             let paginated_resume =
                 matches!(source_thread.history_mode, ThreadHistoryMode::Paginated);
             let existing_thread_rollout_path = existing_thread.rollout_path();
@@ -4763,6 +4774,7 @@ impl ThreadRequestProcessor {
         client_mcp_extensions: ClientMcpExtensions,
     ) -> Result<(), JSONRPCErrorError> {
         let ThreadForkParams {
+            account_selection,
             thread_id,
             last_turn_id,
             before_turn_id,
@@ -4918,6 +4930,7 @@ impl ThreadRequestProcessor {
             developer_instructions,
             /*personality*/ None,
         );
+        typesafe_overrides.account_selection = account_selection;
         typesafe_overrides.ephemeral = ephemeral.then_some(true);
         let restore_approval_policy = typesafe_overrides.approval_policy.is_none();
         let restore_approvals_reviewer = typesafe_overrides.approvals_reviewer.is_none()

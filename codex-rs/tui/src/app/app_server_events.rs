@@ -202,6 +202,9 @@ impl App {
                 self.refresh_mcp_startup_expected_servers_from_config();
             }
             ServerNotification::AccountRateLimitsUpdated(notification) => {
+                if self.chat_widget.managed_accounts_active {
+                    return;
+                }
                 let workspace_hard_stop = matches!(
                     notification.rate_limits.rate_limit_reached_type,
                     Some(
@@ -225,6 +228,9 @@ impl App {
                 return;
             }
             ServerNotification::AccountUpdated(notification) => {
+                if self.chat_widget.managed_accounts_active {
+                    return;
+                }
                 self.chat_widget.cyber_policy_notice = Default::default();
                 self.rate_limit_hard_stop_generation =
                     self.rate_limit_hard_stop_generation.wrapping_add(1);

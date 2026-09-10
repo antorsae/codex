@@ -416,6 +416,24 @@ pub fn process_responses_event(
         }
         "response.failed" => {
             if let Some(resp_val) = event.response {
+                if let Some(error) = resp_val.get("error")
+                    && [error.get("type"), error.get("code")]
+                        .into_iter()
+                        .flatten()
+                        .any(|value| value.as_str() == Some("usage_limit_reached"))
+                {
+                    // Use the same quota-error decoding as HTTP and WebSocket failures.
+                    let mut error = error.clone();
+                    error["type"] = Value::String("usage_limit_reached".to_owned());
+                    return Err(ResponsesEventError::Api(ApiError::Transport(
+                        codex_client::TransportError::Http {
+                            status: http::StatusCode::TOO_MANY_REQUESTS,
+                            url: None,
+                            headers: None,
+                            body: Some(serde_json::json!({ "error": error }).to_string()),
+                        },
+                    )));
+                }
                 let mut response_error = ApiError::Stream("response.failed event received".into());
                 if let Some(error) = resp_val.get("error")
                     && let Ok(error) = serde_json::from_value::<Error>(error.clone())

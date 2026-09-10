@@ -175,6 +175,21 @@ impl ChatWidget {
                 ]);
             }
             ServerNotification::Warning(notification) => self.on_warning(notification.message),
+            ServerNotification::ThreadAccountPool(notification) => {
+                self.managed_accounts_active = true;
+                if let codex_protocol::account_pool::AccountPoolEvent::Selected { account } =
+                    &notification.event
+                {
+                    self.status_account_display = Some(StatusAccountDisplay::ChatGpt {
+                        email: account.email.clone(),
+                        plan: account.plan.clone(),
+                    });
+                    self.clear_pending_rate_limit_reset_requests();
+                    self.rate_limit_snapshots_by_limit_id.clear();
+                } else {
+                    self.add_info_message(notification.event.to_string(), /*hint*/ None);
+                }
+            }
             ServerNotification::GuardianWarning(notification) => {
                 if !notification
                     .message

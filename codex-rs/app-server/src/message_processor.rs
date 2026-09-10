@@ -1614,6 +1614,12 @@ impl MessageProcessor {
             ClientRequest::GetAccountRateLimits { params, .. } => {
                 self.account_processor.get_account_rate_limits(params).await
             }
+            ClientRequest::ManagedAccount { params, .. } => {
+                self.account_processor.managed_account(params).await
+            }
+            ClientRequest::ManagedPool { params, .. } => {
+                self.account_processor.managed_pool(params).await
+            }
             ClientRequest::ConsumeAccountRateLimitResetCredit { params, .. } => {
                 self.account_processor
                     .consume_account_rate_limit_reset_credit(params)

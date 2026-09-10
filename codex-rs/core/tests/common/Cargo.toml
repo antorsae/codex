@@ -12,6 +12,8 @@ doctest = false
 workspace = true
 
 [dependencies]
+pretty_assertions = { workspace = true }
+codex-account-pools = { workspace = true }
 anyhow = { workspace = true }
 assert_cmd = { workspace = true }
 base64 = { workspace = true }

@@ -5,6 +5,76 @@
       "description": "A path that is guaranteed to be absolute and normalized (though it is not guaranteed to be canonicalized or exist on the filesystem).\n\nIMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.",
       "type": "string"
     },
+    "AccountPool": {
+      "properties": {
+        "accounts": {
+          "description": "Ordered aliases. The order breaks quota and reset-credit ties.",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "redeemWeeklyResets": {
+          "description": "Use existing banked credits only when every eligible account is weekly exhausted.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "accounts",
+        "name",
+        "redeemWeeklyResets"
+      ],
+      "type": "object"
+    },
+    "AccountSelection": {
+      "oneOf": [
+        {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "account"
+              ],
+              "title": "AccountAccountSelectionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "type"
+          ],
+          "title": "AccountAccountSelection",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "pool"
+              ],
+              "title": "PoolAccountSelectionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "type"
+          ],
+          "title": "PoolAccountSelection",
+          "type": "object"
+        }
+      ]
+    },
     "AddCreditsNudgeCreditType": {
       "enum": [
         "credits",
@@ -1931,6 +2001,133 @@
         "chatgpt"
       ],
       "type": "string"
+    },
+    "ManagedAccountAction": {
+      "enum": [
+        "add",
+        "import",
+        "list",
+        "select",
+        "remove",
+        "usage",
+        "redeem",
+        "resolve",
+        "models"
+      ],
+      "type": "string"
+    },
+    "ManagedAccountParams": {
+      "properties": {
+        "accountSelection": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AccountSelection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Session selection for `resolve`; omitted selection uses saved state or the user default."
+        },
+        "action": {
+          "$ref": "#/definitions/ManagedAccountAction"
+        },
+        "alias": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deviceAuth": {
+          "description": "Use device-code login for `add`; defaults to browser OAuth.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    },
+    "ManagedPoolAction": {
+      "enum": [
+        "create",
+        "list",
+        "read",
+        "update",
+        "select",
+        "remove"
+      ],
+      "type": "string"
+    },
+    "ManagedPoolParams": {
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/ManagedPoolAction"
+        },
+        "cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pool": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AccountPool"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
     },
     "MarketplaceAddParams": {
       "properties": {
@@ -4144,6 +4341,16 @@
     "ThreadForkParams": {
       "description": "There are two ways to fork a thread: 1. By thread_id: load the thread from disk by thread_id and fork it into a new thread. 2. By path: load the thread from disk by path and fork it into a new thread.\n\nIf using a non-empty path, the thread_id param will be ignored. Empty string path values are treated as absent.\n\nPrefer using thread_id whenever possible.",
       "properties": {
+        "accountSelection": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AccountSelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "approvalPolicy": {
           "anyOf": [
             {
@@ -4758,6 +4965,16 @@
     "ThreadResumeParams": {
       "description": "There are three ways to resume a thread: 1. By thread_id: load the thread from disk by thread_id and resume it. 2. By history: instantiate the thread from memory and resume it. 3. By path: load the thread from disk by path and resume it.\n\nFor non-running threads, the precedence is: history > non-empty path > thread_id. If using history or a non-empty path for a non-running thread, the thread_id param will be ignored.\n\nIf thread_id identifies a running thread, app-server rejoins that thread and treats a non-empty path as a consistency check against the active rollout path. Empty string path values are treated as absent.\n\nPrefer using thread_id whenever possible.",
       "properties": {
+        "accountSelection": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AccountSelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "approvalPolicy": {
           "anyOf": [
             {
@@ -5102,6 +5319,17 @@
     },
     "ThreadStartParams": {
       "properties": {
+        "accountSelection": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AccountSelection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Session-local selection of a server-managed ChatGPT account or pool."
+        },
         "approvalPolicy": {
           "anyOf": [
             {
@@ -7689,6 +7917,54 @@
         "method"
       ],
       "title": "Account/rateLimits/readRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "account/manage"
+          ],
+          "title": "Account/manageRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ManagedAccountParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Account/manageRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "pool/manage"
+          ],
+          "title": "Pool/manageRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ManagedPoolParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Pool/manageRequest",
       "type": "object"
     },
     {

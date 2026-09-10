@@ -1360,6 +1360,8 @@ pub enum EventMsg {
     /// Warning issued while processing a submission. Unlike `Error`, this
     /// indicates the turn continued but the user should still be notified.
     Warning(WarningEvent),
+    /// Session-local account switching and quota recovery status.
+    AccountPool(crate::account_pool::AccountPoolEvent),
 
     /// Provider-owned authentication recovery has started for the current turn.
     AuthRecoveryStarted(AuthRecoveryEvent),

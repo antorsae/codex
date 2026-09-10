@@ -382,6 +382,15 @@ async fn run_remote_compaction_request_v2(
         .stream_max_retries()
         .min(MAX_REMOTE_COMPACTION_V2_STREAM_RETRIES);
     let mut retry_state = ResponsesStreamRetryState::default();
+    let cancellation = CancellationToken::new();
+    crate::account_pools::before_request(
+        sess,
+        turn_context,
+        &step_context.settings.model_info.slug,
+        client_session,
+        &cancellation,
+    )
+    .await?;
     loop {
         let result = match client_session
             .stream(
@@ -402,6 +411,24 @@ async fn run_remote_compaction_request_v2(
 
         match result {
             Ok(compaction_output) => return Ok(compaction_output),
+            Err(err)
+                if matches!(
+                    err.details(),
+                    codex_protocol::error::CodexErrorDetails::UsageLimitReached(_)
+                ) =>
+            {
+                if !crate::account_pools::recover(
+                    sess,
+                    turn_context,
+                    &step_context.settings.model_info.slug,
+                    client_session,
+                    &cancellation,
+                )
+                .await?
+                {
+                    return Err(err);
+                }
+            }
             Err(err) if !err.is_retryable() => return Err(err),
             Err(err) => {
                 handle_retryable_response_stream_error(

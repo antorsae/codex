@@ -261,6 +261,15 @@ pub(crate) struct AgentsOverviewThreadRefresh {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, IntoStaticStr)]
 pub(crate) enum AppEvent {
+    ManagedAccounts {
+        args: String,
+    },
+    ManagedPools {
+        args: String,
+    },
+    ManagedAccountOutput {
+        result: Result<String, String>,
+    },
     ReviewMisalignment(Arc<crate::chatwidget::MisalignmentReview>),
     ContinueMisalignment(Arc<crate::chatwidget::MisalignmentReview>),
     CloseMisalignmentReview,

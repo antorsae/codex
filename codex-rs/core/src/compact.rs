@@ -276,6 +276,15 @@ async fn run_compact_task_inner_impl(
         )
         .await;
 
+    let pool_cancellation = tokio_util::sync::CancellationToken::new();
+    crate::account_pools::before_request(
+        &sess,
+        &turn_context,
+        &turn_context.model_info().slug,
+        &mut client_session,
+        &pool_cancellation,
+    )
+    .await?;
     let compaction_response_id = loop {
         // Clone is required because of the loop
         let turn_input = history
@@ -329,6 +338,19 @@ async fn run_compact_task_inner_impl(
                 let event = EventMsg::Error(e.to_error_event(/*message_prefix*/ None));
                 sess.send_event(&turn_context, event).await;
                 return Err(e);
+            }
+            Err(e) if matches!(e.details(), CodexErrorDetails::UsageLimitReached(_)) => {
+                if !crate::account_pools::recover(
+                    &sess,
+                    &turn_context,
+                    &turn_context.model_info().slug,
+                    &mut client_session,
+                    &pool_cancellation,
+                )
+                .await?
+                {
+                    return Err(e);
+                }
             }
             Err(e) => {
                 if retries < max_retries {
