@@ -62,6 +62,52 @@ async fn account_selection_refreshes_all_quota_and_pool_list_renders_server_data
     let report = result.map_err(|error| color_eyre::eyre::eyre!("{error}"))?;
     assert!(report.markdown.contains("| work | a\\, b | Enabled |"));
 
+    let account = codex_protocol::account_pool::ManagedAccount {
+        alias: "b".to_owned(),
+        user_id: "user-b".to_owned(),
+        workspace_id: "workspace-b".to_owned(),
+        email: Some("b@example.com".to_owned()),
+        plan: Some("pro".to_owned()),
+    };
+    let request_id = uuid::Uuid::new_v4();
+    app.refresh_account_status(&session, request_id, account.clone());
+    let AppEvent::AccountStatusLoaded {
+        request_id: received_id,
+        result,
+    } = events.recv().await.expect("footer usage")
+    else {
+        panic!("expected selected account footer usage");
+    };
+    let usage = result.map_err(|error| color_eyre::eyre::eyre!("{error}"))?;
+    assert_eq!(
+        (
+            received_id,
+            usage.account,
+            usage
+                .windows
+                .iter()
+                .map(|window| window.remaining_percent)
+                .collect::<Vec<_>>()
+        ),
+        (request_id, account, vec![90.0, 90.0])
+    );
+    let identities: Vec<_> = backend
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|request| request.url.path() == "/api/codex/usage")
+        .map(|request| {
+            request.headers["chatgpt-account-id"]
+                .to_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    let mut expected = ["workspace-a", "workspace-b"].repeat(/*n*/ 3);
+    expected.push("workspace-b");
+    assert_eq!(identities, expected);
+
     // A successful selection must survive unavailable usage and show its error explicitly.
     backend.reset().await;
     wiremock::Mock::given(wiremock::matchers::method("GET"))

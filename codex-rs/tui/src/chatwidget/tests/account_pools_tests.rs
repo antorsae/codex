@@ -7,6 +7,72 @@ use codex_protocol::account_pool::ManagedAccountUsage;
 use codex_protocol::account_pool::PoolWaitReason;
 
 #[tokio::test]
+async fn configured_account_footer_and_picker_snapshot() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    let (mut chat, mut events, _ops) = make_chatwidget_manual(Some("gpt-5.4")).await;
+    set_chatgpt_auth(&mut chat);
+    set_fast_mode_test_catalog(&mut chat);
+    chat.show_welcome_banner = false;
+    chat.config.cwd = test_project_path().abs();
+    chat.local_settings.tui.status_line = Some(
+        [
+            "model-with-reasoning",
+            "current-dir",
+            "git-branch",
+            "weekly-limit-with-reset",
+            "account-email",
+        ]
+        .map(str::to_owned)
+        .to_vec(),
+    );
+    chat.set_reasoning_effort(Some(ReasoningEffortConfig::XHigh));
+    chat.set_service_tier(Some(ServiceTier::Fast.request_value().to_owned()));
+    chat.status_line_branch_cwd = Some(chat.config.cwd.to_path_buf());
+    chat.status_line_branch = Some("feature/account-footer".to_owned());
+    chat.status_line_branch_lookup_complete = true;
+    chat.status_account_display = Some(StatusAccountDisplay::ChatGpt {
+        email: Some("a@example.com".to_owned()),
+        plan: Some("pro".to_owned()),
+    });
+    chat.on_rate_limit_snapshot(Some(RateLimitSnapshot {
+        limit_id: None,
+        limit_name: None,
+        normal_model_slug: None,
+        primary: None,
+        secondary: Some(RateLimitWindow {
+            used_percent: 50,
+            window_duration_mins: Some(7 * 24 * 60),
+            // Mid-hour keeps the UI snapshot stable; exact clock boundaries are tested separately.
+            resets_at: Some(Local::now().timestamp() + 6 * 86_400 + 21 * 3600 + 1800),
+        }),
+        credits: None,
+        individual_limit: None,
+        spend_control_reached: None,
+        plan_type: None,
+        rate_limit_reached_type: None,
+    }));
+    drain_insert_history(&mut events);
+    for width in [140, 80] {
+        let mut terminal =
+            Terminal::new(TestBackend::new(width, chat.desired_height(width))).unwrap();
+        terminal
+            .draw(|frame| chat.render(frame.area(), frame.buffer_mut()))
+            .unwrap();
+        assert_chatwidget_snapshot!(
+            format!("configured_account_footer_{width}"),
+            normalized_backend_snapshot(terminal.backend())
+        );
+    }
+    chat.open_status_line_setup();
+    assert_chatwidget_snapshot!(
+        "configured_account_footer_picker",
+        render_bottom_popup(&chat, /*width*/ 100)
+    );
+}
+
+#[tokio::test]
 async fn native_account_pool_controls_and_recovery_snapshot() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.dispatch_command(SlashCommand::Accounts);
@@ -52,6 +118,7 @@ async fn native_account_pool_controls_and_recovery_snapshot() {
     chat.add_account_pool_report(history_cell::AccountPoolReport::accounts(
         &codex_app_server_protocol::ManagedAccountResponse {
             resolved: None,
+            selected_account: None,
             models: None,
             data: vec![account.clone()],
             next_cursor: None,

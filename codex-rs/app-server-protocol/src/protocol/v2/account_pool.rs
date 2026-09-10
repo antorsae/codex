@@ -55,6 +55,9 @@ pub struct ManagedAccountResponse {
         schema_with = "crate::protocol::serde_helpers::nullable_embedded_response_schema::<super::GetAccountResponse>"
     )]
     pub resolved: Option<super::GetAccountResponse>,
+    /// Identity selected by `resolve` or `models`, without credentials.
+    #[serde(default)]
+    pub selected_account: Option<ManagedAccount>,
     pub models: Option<Vec<super::Model>>,
     pub data: Vec<ManagedAccount>,
     pub next_cursor: Option<String>,

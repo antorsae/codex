@@ -710,6 +710,18 @@
       ],
       "description": "Null means this selection uses legacy authentication."
     },
+    "selectedAccount": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ManagedAccount"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Identity selected by `resolve` or `models`, without credentials."
+    },
     "usage": {
       "items": {
         "$ref": "#/definitions/ManagedAccountUsage"

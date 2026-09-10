@@ -122,6 +122,7 @@ impl ChatWidget {
             active_collaboration_mask,
             has_chatgpt_account,
             managed_accounts_active: false,
+            account_status: Default::default(),
             requires_openai_auth,
             has_codex_backend_auth,
             model_catalog,

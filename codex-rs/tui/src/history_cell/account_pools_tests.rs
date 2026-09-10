@@ -17,6 +17,7 @@ fn accounts() -> ManagedAccountResponse {
     };
     ManagedAccountResponse {
         resolved: None,
+        selected_account: None,
         models: None,
         data: vec![account.clone()],
         next_cursor: None,

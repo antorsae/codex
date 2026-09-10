@@ -312,6 +312,7 @@ pub(crate) struct AppServerSession {
     account_selection: Option<codex_protocol::account_pool::AccountSelection>,
     account_thread_id: Option<String>,
     pub(crate) managed_accounts_active: bool,
+    pub(crate) selected_managed_account: Option<codex_protocol::account_pool::ManagedAccount>,
     next_request_id: i64,
     history_pagination: HashMap<ThreadId, history::ThreadHistoryPagination>,
     task_tool_threads: HashSet<ThreadId>,
@@ -417,6 +418,7 @@ impl AppServerSession {
             account_selection: None,
             account_thread_id: None,
             managed_accounts_active: false,
+            selected_managed_account: None,
             history_pagination: HashMap::new(),
             task_tool_threads: HashSet::new(),
             task_tool_capabilities_dir: None,
@@ -708,6 +710,7 @@ impl AppServerSession {
         use codex_app_server_protocol::ManagedAccountAction;
         use codex_app_server_protocol::ManagedAccountParams;
         use codex_app_server_protocol::ManagedAccountResponse;
+        self.selected_managed_account = None;
         let request_id = self.next_request_id();
         let managed: std::result::Result<ManagedAccountResponse, _> = self
             .client
@@ -729,6 +732,7 @@ impl AppServerSession {
             Ok(response) => {
                 self.managed_accounts_active = response.resolved.is_some();
                 if let Some(account) = response.resolved {
+                    self.selected_managed_account = response.selected_account;
                     return Ok(account);
                 }
             }

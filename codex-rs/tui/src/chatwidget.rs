@@ -424,6 +424,7 @@ mod windows_sandbox_prompts;
 use self::status_state::StatusIndicatorState;
 use self::status_state::StatusState;
 use self::status_state::TerminalTitleStatusKind;
+mod account_status;
 mod status_controls;
 mod status_surfaces;
 mod streaming;
@@ -570,6 +571,7 @@ pub(crate) struct ChatWidget {
     active_collaboration_mask: Option<CollaborationModeMask>,
     has_chatgpt_account: bool,
     pub(crate) managed_accounts_active: bool,
+    account_status: account_status::AccountStatus,
     pub(crate) requires_openai_auth: bool,
     has_codex_backend_auth: bool,
     model_catalog: Arc<ModelCatalog>,
@@ -1193,6 +1195,7 @@ impl ChatWidget {
         }
         self.refresh_status_line_if_workspace_headline_due();
         self.refresh_thread_usage_if_settlement_due();
+        self.refresh_account_status_if_due();
     }
 
     fn flush_active_cell(&mut self) {

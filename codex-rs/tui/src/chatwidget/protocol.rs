@@ -186,6 +186,8 @@ impl ChatWidget {
                     });
                     self.clear_pending_rate_limit_reset_requests();
                     self.rate_limit_snapshots_by_limit_id.clear();
+                    self.account_status.select(account.clone());
+                    self.refresh_status_surfaces();
                 } else {
                     self.add_info_message(notification.event.to_string(), /*hint*/ None);
                 }

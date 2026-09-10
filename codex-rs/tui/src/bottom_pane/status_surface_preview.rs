@@ -39,6 +39,8 @@ pub(crate) enum StatusSurfacePreviewItem {
     ModelWithReasoning,
     Reasoning,
     TaskProgress,
+    WeeklyLimitWithReset,
+    AccountEmail,
 }
 
 impl StatusSurfacePreviewItem {
@@ -76,6 +78,8 @@ impl StatusSurfacePreviewItem {
             StatusSurfacePreviewItem::ModelWithReasoning => "gpt-5.2-codex medium",
             StatusSurfacePreviewItem::Reasoning => "medium",
             StatusSurfacePreviewItem::TaskProgress => "Tasks 0/0",
+            StatusSurfacePreviewItem::WeeklyLimitWithReset => "50% 6d21h",
+            StatusSurfacePreviewItem::AccountEmail => "you@example.com",
         }
     }
 
@@ -113,6 +117,8 @@ impl StatusSurfacePreviewItem {
             Self::ModelWithReasoning,
             Self::Reasoning,
             Self::TaskProgress,
+            Self::WeeklyLimitWithReset,
+            Self::AccountEmail,
         ]
         .into_iter()
     }

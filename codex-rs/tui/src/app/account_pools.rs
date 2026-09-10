@@ -16,6 +16,45 @@ use codex_app_server_protocol::RequestId;
 use codex_protocol::account_pool::AccountPool;
 
 impl App {
+    pub(super) fn refresh_account_status(
+        &mut self,
+        server: &AppServerSession,
+        request_id: uuid::Uuid,
+        account: codex_protocol::account_pool::ManagedAccount,
+    ) {
+        let handle = server.request_handle();
+        let tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            let result = tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 30), async {
+                let response: ManagedAccountResponse = handle
+                    .request_typed(ClientRequest::ManagedAccount {
+                        request_id: RequestId::String(request_id.to_string()),
+                        params: ManagedAccountParams {
+                            action: ManagedAccountAction::Usage,
+                            alias: Some(account.alias),
+                            account_selection: None,
+                            thread_id: None,
+                            device_auth: None,
+                            model: None,
+                            cursor: None,
+                            limit: None,
+                        },
+                    })
+                    .await
+                    .map_err(|error| error.to_string())?;
+                response
+                    .usage
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| "No usage returned for the selected account".to_owned())
+            })
+            .await
+            .map_err(|_| "Account status request timed out".to_owned())
+            .and_then(std::convert::identity);
+            tx.send(AppEvent::AccountStatusLoaded { request_id, result });
+        });
+    }
+
     pub(super) fn manage_accounts(&mut self, server: &AppServerSession, args: &str) {
         let mut words: Vec<_> = args.split_whitespace().collect();
         let device_auth = words.last() == Some(&"--device-auth");

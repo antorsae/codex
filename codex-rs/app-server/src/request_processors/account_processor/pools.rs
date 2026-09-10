@@ -45,6 +45,7 @@ impl AccountRequestProcessor {
         };
         let mut login_response = None;
         let mut resolved = None;
+        let mut selected_account = None;
         let mut models = None;
         let mut usage = Vec::new();
         let mut imported_alias = None;
@@ -68,6 +69,7 @@ impl AccountRequestProcessor {
                             .into_iter().map(crate::models::model_from_preset).collect());
                     }
                     let state = provider.account_state()?;
+                    selected_account = Some(pool.selected_account().await);
                     resolved = Some(codex_app_server_protocol::GetAccountResponse {
                         account: state.account.map(codex_app_server_protocol::Account::from),
                         requires_openai_auth: state.requires_openai_auth,
@@ -191,6 +193,7 @@ impl AccountRequestProcessor {
         }
         Ok(ManagedAccountResponse {
             resolved,
+            selected_account,
             models,
             data,
             next_cursor,

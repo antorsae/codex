@@ -9558,6 +9558,13 @@ class ManagedAccountResponse(BaseModel):
         RequiresOpenaiAuthManagedAccountResponse | None,
         Field(description="Null means this selection uses legacy authentication."),
     ] = None
+    selected_account: Annotated[
+        ManagedAccount | None,
+        Field(
+            alias="selectedAccount",
+            description="Identity selected by `resolve` or `models`, without credentials.",
+        ),
+    ] = None
     usage: list[ManagedAccountUsage]
 
 

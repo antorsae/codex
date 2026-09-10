@@ -12,4 +12,8 @@ export type ManagedAccountResponse = {
 /**
  * Null means this selection uses legacy authentication.
  */
-resolved: GetAccountResponse | null, models: Array<Model> | null, data: Array<ManagedAccount>, nextCursor: string | null, usage: Array<ManagedAccountUsage>, login: LoginAccountResponse | null, defaultSelection: AccountSelection | null, };
+resolved: GetAccountResponse | null,
+/**
+ * Identity selected by `resolve` or `models`, without credentials.
+ */
+selectedAccount: ManagedAccount | null, models: Array<Model> | null, data: Array<ManagedAccount>, nextCursor: string | null, usage: Array<ManagedAccountUsage>, login: LoginAccountResponse | null, defaultSelection: AccountSelection | null, };

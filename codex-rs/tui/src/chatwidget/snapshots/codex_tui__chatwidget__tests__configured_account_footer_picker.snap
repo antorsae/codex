@@ -1,0 +1,20 @@
+---
+source: tui/src/chatwidget/tests/account_pools_tests.rs
+expression: "render_bottom_popup(&chat, 100)"
+---
+  Configure Status Line
+  Select which items to display in the status line.
+
+  Type to search
+  >
+› [x] Use theme colors       Apply colors from the active /theme
+  ───────────────────────
+  [x] model-with-reasoning   Current model name with reasoning level
+  [x] current-dir            Current working directory
+  [x] git-branch             Current Git branch (omitted when unavailable)
+  [x] weekly-limit-with-...  Weekly quota remaining with reset countdown (omitted when unavailabl…
+  [x] account-email          Active ChatGPT account email (omitted when unavailable)
+  [ ] model                  Current model name
+
+  gpt-5.4 xhigh fast · /tmp/project · feature/account-footer · 50% 6d21h · a@example.com
+  Press space to toggle; ←/→ to move; enter to confirm and close; esc to close

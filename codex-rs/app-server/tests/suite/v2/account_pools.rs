@@ -69,6 +69,8 @@ async fn account_pool_management_and_partial_stream_recovery() -> Result<()> {
         )
         .await?;
     let resolved: ManagedAccountResponse = server.read_response(request).await?;
+    assert_eq!(resolved.selected_account, second.data.first().cloned());
+    assert!(!serde_json::to_string(&resolved)?.contains("secret-"));
     assert!(matches!(
         resolved.resolved.unwrap().account,
         Some(codex_app_server_protocol::Account::Chatgpt { .. })
