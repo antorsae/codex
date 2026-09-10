@@ -558,7 +558,7 @@ impl Session {
             parent_rollout_thread_trace,
             parent_trace: _,
             environment_selections,
-            thread_extension_init,
+            mut thread_extension_init,
             client_mcp_extensions,
             reserved_thread_id,
             analytics_events_client,
@@ -616,6 +616,25 @@ impl Session {
             )
         };
 
+        let resume_id = match &conversation_history {
+            InitialHistory::Resumed(history) => Some(history.conversation_id.to_string()),
+            InitialHistory::Forked(_) => forked_from_thread_id.map(|id| id.to_string()),
+            InitialHistory::New | InitialHistory::Cleared => None,
+        };
+        let pool_session =
+            crate::account_pools::initialize(&config, &auth_manager, resume_id.as_deref())
+                .await
+                .map_err(|error| CodexErr::Fatal(error.to_string()))?;
+        let (auth_manager, models_manager) = if let Some(pool) = pool_session {
+            config.account_selection = Some(pool.selection().clone());
+            let auth = pool.auth_manager();
+            let models = create_model_provider(config.model_provider.clone(), Some(auth.clone()))
+                .models_manager_without_cache(config.model_catalog.clone());
+            thread_extension_init.insert(pool);
+            (auth, models)
+        } else {
+            (auth_manager, models_manager)
+        };
         let mut config = Arc::new(config);
         let refresh_strategy = if session_source.is_non_root_agent() {
             codex_models_manager::manager::RefreshStrategy::Offline

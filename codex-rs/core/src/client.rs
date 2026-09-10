@@ -1167,6 +1167,14 @@ impl Drop for ModelClientSession {
 }
 
 impl ModelClientSession {
+    /// Account changes invalidate incremental responses, sockets and sticky routing together.
+    pub(crate) fn invalidate_account_transport(&mut self) {
+        self.websocket_session = WebsocketSession::default();
+        self.turn_state = Arc::new(OnceLock::new());
+        self.client
+            .store_cached_websocket_session(WebsocketSession::default());
+    }
+
     fn reset_websocket_session(&mut self) {
         self.websocket_session.connection = None;
         self.websocket_session.endpoint = None;

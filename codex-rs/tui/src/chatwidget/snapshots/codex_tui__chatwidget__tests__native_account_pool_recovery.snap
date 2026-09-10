@@ -1,0 +1,13 @@
+---
+source: tui/src/chatwidget/tests/account_pools_tests.rs
+assertion_line: 30
+expression: lines_to_single_string(&history)
+---
+• work-b | pro | pools: work | checked 2027-01-15T08:00:00+00:00
+  codex: 0% remaining (300 minutes), resets 2027-01-15T08:01:00+00:00
+  codex: 40% remaining (10080 minutes), resets 2027-01-22T08:00:00+00:00
+  Banked resets: 2 | authenticated
+
+• Account work-a: waiting because short-window quota is exhausted. Next check: 2027-01-15T08:01:00+00:00. Cancel to stop monitoring.
+
+• Account switched from work-a to work-b; continuing with the same model

@@ -1533,6 +1533,14 @@ async fn run_sampling_request(
     let mut initial_input = Some(input);
     let mut original_input = None;
     let mut executed_tool_calls_by_output = HashMap::new();
+    crate::account_pools::before_request(
+        &sess,
+        &turn_context,
+        &step_context.settings.model_info.slug,
+        client_session,
+        &cancellation_token,
+    )
+    .await?;
     loop {
         // A retry must not attribute the next tool call to the previous response.
         turn_context
@@ -1588,6 +1596,20 @@ async fn run_sampling_request(
                     let rate_limits = e.rate_limits.clone();
                     if let Some(rate_limits) = rate_limits {
                         sess.update_rate_limits(&turn_context, *rate_limits).await;
+                    }
+                    if crate::account_pools::recover(
+                        &sess,
+                        &turn_context,
+                        &step_context.settings.model_info.slug,
+                        client_session,
+                        &cancellation_token,
+                    )
+                    .await?
+                    {
+                        if original_input.is_none() {
+                            original_input = Some(prompt.input);
+                        }
+                        continue;
                     }
                     return Err(err);
                 }
@@ -1964,6 +1986,7 @@ pub(super) fn realtime_text_for_event(msg: &EventMsg) -> Option<(String, Option<
         }
         EventMsg::Error(_)
         | EventMsg::Warning(_)
+        | EventMsg::AccountPool(_)
         | EventMsg::AuthRecoveryStarted(_)
         | EventMsg::AuthRecoveryCompleted(_)
         | EventMsg::GuardianWarning(_)
@@ -2428,6 +2451,7 @@ async fn try_run_sampling_request(
     let mut needs_follow_up = false;
     let mut last_agent_message: Option<String> = None;
     let mut active_item: Option<TurnItem> = None;
+    let mut partial_assistant = crate::account_pool_stream::PartialAssistantMessage::default();
     let mut active_tool_argument_diff_consumer: Option<(
         String,
         Box<dyn ToolArgumentDiffConsumer>,
@@ -2505,6 +2529,7 @@ async fn try_run_sampling_request(
                 }
             }
             ResponseEvent::OutputItemDone(mut item) => {
+                partial_assistant.complete();
                 assign_missing_streamed_response_item_id(&mut item, active_item.as_ref());
                 if analytics_tool_call_ids.len() < MAX_ANALYTICS_TOOL_CALL_IDS_PER_RESPONSE {
                     let call_id = match &item {
@@ -2618,6 +2643,7 @@ async fn try_run_sampling_request(
             }
             ResponseEvent::OutputItemAdded(mut item) => {
                 assign_missing_streamed_response_item_id(&mut item, /*active_item*/ None);
+                partial_assistant.start(&item);
                 if let ResponseItem::CustomToolCall {
                     call_id,
                     name,
@@ -2796,6 +2822,7 @@ async fn try_run_sampling_request(
                 });
             }
             ResponseEvent::OutputTextDelta(delta) => {
+                partial_assistant.append(&delta);
                 // In review child threads, suppress assistant text deltas; the
                 // UI will show a selection popup from the final ReviewOutput.
                 if let Some(active) = active_item.as_ref() {
@@ -2960,6 +2987,26 @@ async fn try_run_sampling_request(
         Some(turn_context.turn_timing_state.begin_tool_blocking())
     };
     drain_in_flight(&mut in_flight, sess.clone(), &step_context).await?;
+    if outcome
+        .as_ref()
+        .is_err_and(|error| matches!(error.details(), CodexErrorDetails::UsageLimitReached(_)))
+        && sess
+            .services
+            .thread_extension_data
+            .get::<Arc<codex_account_pools::PoolSession>>()
+            .is_some()
+        && let Some(item) = partial_assistant.take()
+    {
+        sess.record_conversation_items(
+            &turn_context,
+            &step_context.settings.model_info,
+            std::slice::from_ref(&item),
+        )
+        .await;
+        if let Some(item) = crate::parse_turn_item(&item) {
+            sess.emit_turn_item_completed(&turn_context, item).await;
+        }
+    }
     drop(tool_blocking_timing_guard);
 
     if should_emit_token_count {

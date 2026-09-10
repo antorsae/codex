@@ -1288,6 +1288,18 @@ client_request_definitions! {
         response: v2::GetAccountRateLimitsResponse,
     },
 
+    ManagedAccount => "account/manage" {
+        params: v2::ManagedAccountParams,
+        serialization: global("managed-accounts"),
+        response: v2::ManagedAccountResponse,
+    },
+
+    ManagedPool => "pool/manage" {
+        params: v2::ManagedPoolParams,
+        serialization: global("managed-accounts"),
+        response: v2::ManagedPoolResponse,
+    },
+
     ConsumeAccountRateLimitResetCredit => "account/rateLimitResetCredit/consume" {
         params: v2::ConsumeAccountRateLimitResetCreditParams,
         serialization: global("account-auth"),
@@ -1956,6 +1968,7 @@ server_notification_definitions! {
     McpServerEventStream => "mcpServer/event/stream/notification" (v2::McpServerEventStreamNotification),
     AccountUpdated => "account/updated" (v2::AccountUpdatedNotification),
     AccountRateLimitsUpdated => "account/rateLimits/updated" (v2::AccountRateLimitsUpdatedNotification),
+    ThreadAccountPool => "thread/accountPool/updated" (v2::ThreadAccountPoolNotification),
     AppListUpdated => "app/list/updated" (v2::AppListUpdatedNotification),
     RemoteControlStatusChanged => "remoteControl/status/changed" (v2::RemoteControlStatusChangedNotification),
     ExternalAgentConfigImportProgress => "externalAgentConfig/import/progress" (v2::ExternalAgentConfigImportProgressNotification),

@@ -78,6 +78,10 @@ use uuid::Uuid;
 mod archive;
 mod page_loading;
 
+#[cfg(test)]
+#[path = "resume_picker_account_pools_tests.rs"]
+mod account_pools_tests;
+
 use page_loading::PageCwdFilter;
 use page_loading::PageLoadMode;
 use page_loading::PaginationState;
@@ -372,7 +376,7 @@ pub async fn run_resume_picker_with_app_server(
     show_all: bool,
     include_non_interactive: bool,
     app_server: AppServerSession,
-) -> Result<SessionSelection> {
+) -> Result<(SessionSelection, AppServerSession)> {
     let archive_request_handle = app_server.request_handle();
     run_resume_picker_with_launch_context(
         uses_remote_filesystem,
@@ -403,7 +407,7 @@ pub async fn run_resume_picker_from_existing_session_with_app_server(
     archive_request_handle: AppServerRequestHandle,
     current_thread_id: Option<ThreadId>,
 ) -> Result<SessionSelection> {
-    run_resume_picker_with_launch_context(
+    let (selection, app_server) = run_resume_picker_with_launch_context(
         uses_remote_filesystem,
         tui,
         config,
@@ -414,7 +418,11 @@ pub async fn run_resume_picker_from_existing_session_with_app_server(
         archive_request_handle,
         SessionPickerLaunchContext::ExistingSession { current_thread_id },
     )
-    .await
+    .await?;
+    if let Err(error) = app_server.shutdown().await {
+        warn!(%error, "Failed to shut down app-server picker session");
+    }
+    Ok(selection)
 }
 
 #[expect(
@@ -431,7 +439,7 @@ async fn run_resume_picker_with_launch_context(
     app_server: AppServerSession,
     archive_request_handle: AppServerRequestHandle,
     launch_context: SessionPickerLaunchContext,
-) -> Result<SessionSelection> {
+) -> Result<(SessionSelection, AppServerSession)> {
     let (bg_tx, bg_rx) = mpsc::unbounded_channel();
     let uses_remote_workspace = app_server.uses_remote_workspace();
     let cwd_filter = picker_cwd_filter(
@@ -466,21 +474,24 @@ async fn run_resume_picker_with_launch_context(
         },
         chord_keymap: runtime_keymap.chords,
     };
-    run_session_picker_with_loader(
-        tui,
-        options,
-        spawn_app_server_page_loader(
-            uses_remote_filesystem,
-            app_server,
-            archive_request_handle,
-            include_non_interactive,
-            raw_reasoning_visibility(config),
-            (!uses_remote_workspace).then(|| config.clone()),
-            bg_tx,
-        ),
-        bg_rx,
-    )
-    .await
+    let (loader, worker) = spawn_app_server_page_loader(
+        uses_remote_filesystem,
+        app_server,
+        archive_request_handle,
+        include_non_interactive,
+        raw_reasoning_visibility(config),
+        (!uses_remote_workspace).then(|| config.clone()),
+        bg_tx,
+    );
+    let selection = run_session_picker_with_loader(tui, options, loader, bg_rx).await;
+    let app_server = worker.await?;
+    match selection {
+        Ok(selection) => Ok((selection, app_server)),
+        Err(error) => {
+            let _ = app_server.shutdown().await;
+            Err(error)
+        }
+    }
 }
 
 pub async fn run_fork_picker_with_app_server(
@@ -490,7 +501,7 @@ pub async fn run_fork_picker_with_app_server(
     local_settings: &crate::local_settings::LocalSettings,
     show_all: bool,
     app_server: AppServerSession,
-) -> Result<SessionSelection> {
+) -> Result<(SessionSelection, AppServerSession)> {
     let archive_request_handle = app_server.request_handle();
     let (bg_tx, bg_rx) = mpsc::unbounded_channel();
     let uses_remote_workspace = app_server.uses_remote_workspace();
@@ -526,21 +537,24 @@ pub async fn run_fork_picker_with_app_server(
         },
         chord_keymap: runtime_keymap.chords,
     };
-    run_session_picker_with_loader(
-        tui,
-        options,
-        spawn_app_server_page_loader(
-            uses_remote_filesystem,
-            app_server,
-            archive_request_handle,
-            /*include_non_interactive*/ false,
-            raw_reasoning_visibility(config),
-            (!uses_remote_workspace).then(|| config.clone()),
-            bg_tx,
-        ),
-        bg_rx,
-    )
-    .await
+    let (loader, worker) = spawn_app_server_page_loader(
+        uses_remote_filesystem,
+        app_server,
+        archive_request_handle,
+        /*include_non_interactive*/ false,
+        raw_reasoning_visibility(config),
+        (!uses_remote_workspace).then(|| config.clone()),
+        bg_tx,
+    );
+    let selection = run_session_picker_with_loader(tui, options, loader, bg_rx).await;
+    let app_server = worker.await?;
+    match selection {
+        Ok(selection) => Ok((selection, app_server)),
+        Err(error) => {
+            let _ = app_server.shutdown().await;
+            Err(error)
+        }
+    }
 }
 
 async fn run_session_picker_with_loader(
@@ -692,13 +706,23 @@ fn spawn_app_server_page_loader(
     raw_reasoning_visibility: RawReasoningVisibility,
     config: Option<Config>,
     bg_tx: mpsc::UnboundedSender<BackgroundEvent>,
-) -> PickerLoader {
+) -> (PickerLoader, tokio::task::JoinHandle<AppServerSession>) {
     let (request_tx, mut request_rx) = mpsc::unbounded_channel::<PickerLoadRequest>();
 
-    tokio::spawn(async move {
+    let worker = tokio::spawn(async move {
         let mut app_server = app_server;
         let mut page_cwd_filter = PageCwdFilter::default();
         while let Some(request) = request_rx.recv().await {
+            if bg_tx.is_closed()
+                && matches!(
+                    &request,
+                    PickerLoadRequest::Page(_)
+                        | PickerLoadRequest::Preview { .. }
+                        | PickerLoadRequest::Transcript { .. }
+                )
+            {
+                continue;
+            }
             match request {
                 PickerLoadRequest::Page(request) => {
                     let cwd_filter = page_cwd_filter.for_request(
@@ -719,7 +743,10 @@ fn spawn_app_server_page_loader(
                         include_non_interactive,
                         matches!(request.mode, PageLoadMode::StateDbOnly),
                     );
-                    let page = load_app_server_page(&mut app_server, params).await;
+                    let page = tokio::select! {
+                        _ = bg_tx.closed() => continue,
+                        page = load_app_server_page(&mut app_server, params) => page,
+                    };
                     let _ = bg_tx.send(BackgroundEvent::Page {
                         request_token: request.request_token,
                         search_token: request.search_token,
@@ -727,8 +754,10 @@ fn spawn_app_server_page_loader(
                     });
                 }
                 PickerLoadRequest::Preview { thread_id } => {
-                    let preview =
-                        load_transcript_preview(&mut app_server, thread_id, config.as_ref()).await;
+                    let preview = tokio::select! {
+                        _ = bg_tx.closed() => continue,
+                        preview = load_transcript_preview(&mut app_server, thread_id, config.as_ref()) => preview,
+                    };
                     let _ = bg_tx.send(BackgroundEvent::Preview { thread_id, preview });
                 }
                 PickerLoadRequest::Transcript {
@@ -748,6 +777,7 @@ fn spawn_app_server_page_loader(
                             });
                         }
                         _ = cancellation => {}
+                        _ = bg_tx.closed() => {}
                     }
                 }
                 PickerLoadRequest::Archive { thread_id } => {
@@ -789,14 +819,15 @@ fn spawn_app_server_page_loader(
                 }
             }
         }
-        if let Err(err) = app_server.shutdown().await {
-            warn!(%err, "Failed to shut down app-server picker session");
-        }
+        app_server
     });
 
-    Arc::new(move |request: PickerLoadRequest| {
-        let _ = request_tx.send(request);
-    })
+    (
+        Arc::new(move |request: PickerLoadRequest| {
+            let _ = request_tx.send(request);
+        }),
+        worker,
+    )
 }
 
 /// Returns the human-readable column header for the given sort key.
@@ -3780,7 +3811,7 @@ mod tests {
             .expect("start local app-server");
         let request_handle = app_server.request_handle();
         let (bg_tx, mut bg_rx) = mpsc::unbounded_channel();
-        let loader = spawn_app_server_page_loader(
+        let (loader, worker) = spawn_app_server_page_loader(
             /*uses_remote_filesystem*/ false,
             app_server,
             request_handle,
@@ -3868,6 +3899,8 @@ mod tests {
         assert_eq!(state.local_filter_cwd, None);
         state.apply_filter();
         assert_eq!(state.filtered_rows, vec![row]);
+        drop(live_picker);
+        worker.await.unwrap().shutdown().await.unwrap();
     }
 
     #[test]

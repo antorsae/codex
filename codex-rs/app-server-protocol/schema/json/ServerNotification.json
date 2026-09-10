@@ -38,6 +38,103 @@
       ],
       "type": "object"
     },
+    "AccountPoolEvent": {
+      "oneOf": [
+        {
+          "properties": {
+            "account": {
+              "$ref": "#/definitions/ManagedAccount"
+            },
+            "type": {
+              "enum": [
+                "selected"
+              ],
+              "title": "SelectedAccountPoolEventType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "account",
+            "type"
+          ],
+          "title": "SelectedAccountPoolEvent",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "account": {
+              "type": "string"
+            },
+            "previousAccount": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "switched"
+              ],
+              "title": "SwitchedAccountPoolEventType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "account",
+            "previousAccount",
+            "type"
+          ],
+          "title": "SwitchedAccountPoolEvent",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "account": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "redeemed"
+              ],
+              "title": "RedeemedAccountPoolEventType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "account",
+            "type"
+          ],
+          "title": "RedeemedAccountPoolEvent",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "account": {
+              "type": "string"
+            },
+            "nextCheckAt": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "reason": {
+              "$ref": "#/definitions/PoolWaitReason"
+            },
+            "type": {
+              "enum": [
+                "waiting"
+              ],
+              "title": "WaitingAccountPoolEventType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "account",
+            "nextCheckAt",
+            "reason",
+            "type"
+          ],
+          "title": "WaitingAccountPoolEvent",
+          "type": "object"
+        }
+      ]
+    },
     "AccountRateLimitsUpdatedNotification": {
       "description": "Sparse rolling rate-limit update.\n\nClients should merge available values into the most recent `account/rateLimits/read` response or refetch that snapshot. Nullable account metadata may be unavailable in a rolling update and does not clear a previously observed value.",
       "properties": {
@@ -2671,6 +2768,37 @@
     "LegacyAppPathString": {
       "type": "string"
     },
+    "ManagedAccount": {
+      "properties": {
+        "alias": {
+          "type": "string"
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "plan": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "userId": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "alias",
+        "userId",
+        "workspaceId"
+      ],
+      "type": "object"
+    },
     "McpServerEventNotification": {
       "properties": {
         "method": {
@@ -3255,6 +3383,15 @@
         "edu_plus",
         "edu_pro",
         "unknown"
+      ],
+      "type": "string"
+    },
+    "PoolWaitReason": {
+      "enum": [
+        "unknownAvailability",
+        "shortWindow",
+        "weeklyQuota",
+        "redemptionPending"
       ],
       "type": "string"
     },
@@ -4302,6 +4439,21 @@
         "status",
         "turns",
         "updatedAt"
+      ],
+      "type": "object"
+    },
+    "ThreadAccountPoolNotification": {
+      "properties": {
+        "event": {
+          "$ref": "#/definitions/AccountPoolEvent"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "event",
+        "threadId"
       ],
       "type": "object"
     },
@@ -7665,6 +7817,26 @@
         "params"
       ],
       "title": "Account/rateLimits/updatedNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "thread/accountPool/updated"
+          ],
+          "title": "Thread/accountPool/updatedNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadAccountPoolNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "Thread/accountPool/updatedNotification",
       "type": "object"
     },
     {

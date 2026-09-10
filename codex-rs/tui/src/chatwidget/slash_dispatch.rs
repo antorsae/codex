@@ -503,6 +503,12 @@ impl ChatWidget {
                     self.open_usage_menu();
                 }
             }
+            SlashCommand::Accounts => self.app_event_tx.send(AppEvent::ManagedAccounts {
+                args: String::new(),
+            }),
+            SlashCommand::Pools => self.app_event_tx.send(AppEvent::ManagedPools {
+                args: String::new(),
+            }),
             SlashCommand::Ide => {
                 self.handle_ide_command();
             }
@@ -754,6 +760,8 @@ impl ChatWidget {
                     }
                 }
             }
+            SlashCommand::Accounts => self.app_event_tx.send(AppEvent::ManagedAccounts { args }),
+            SlashCommand::Pools => self.app_event_tx.send(AppEvent::ManagedPools { args }),
             SlashCommand::Voice => match trimmed.to_ascii_lowercase().as_str() {
                 "mute" => self.toggle_realtime_microphone(),
                 "stop" => self.stop_realtime_conversation(),
@@ -1151,7 +1159,7 @@ impl ChatWidget {
     }
 
     fn ensure_usage_command_available(&mut self) -> bool {
-        if self.has_codex_backend_auth {
+        if self.has_codex_backend_auth || self.managed_accounts_active {
             return true;
         }
         self.add_error_message(USAGE_CHATGPT_LOGIN_REQUIRED.to_string());
@@ -1167,6 +1175,8 @@ impl ChatWidget {
             | SlashCommand::Status
             | SlashCommand::Pwd
             | SlashCommand::Usage
+            | SlashCommand::Accounts
+            | SlashCommand::Pools
             | SlashCommand::DebugConfig
             | SlashCommand::Ps
             | SlashCommand::Stop

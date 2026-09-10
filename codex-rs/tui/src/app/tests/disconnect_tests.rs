@@ -309,6 +309,7 @@ where
         let request_id = request.id.clone();
         let response = match request.method.as_str() {
             "initialize" => Some(json!({"result": {"userAgent": "reconnect-test/2.0.0"}})),
+            "account/manage" => Some(json!({"error":{"code":-32601,"message":"Unknown method"}})),
             "account/read" => {
                 Some(json!({"result": {"account": null, "requiresOpenaiAuth": false}}))
             }

@@ -612,6 +612,8 @@ pub enum ThreadStoreConfig {
 /// Application configuration loaded from disk and merged with overrides.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
+    /// Explicit session selection. This is never read from repository configuration.
+    pub account_selection: Option<codex_protocol::account_pool::AccountSelection>,
     /// Provenance for how this [`Config`] was derived (merged layers + enforced
     /// requirements).
     pub config_layer_stack: ConfigLayerStack,
@@ -2586,6 +2588,7 @@ fn apply_managed_filesystem_constraints(
 /// Optional overrides for user configuration (e.g., from CLI flags).
 #[derive(Default, Debug, Clone)]
 pub struct ConfigOverrides {
+    pub account_selection: Option<codex_protocol::account_pool::AccountSelection>,
     pub model: Option<String>,
     pub review_model: Option<String>,
     pub cwd: Option<PathBuf>,
@@ -3260,6 +3263,7 @@ impl Config {
             persisted_permission_profile_id,
             model_provider,
             service_tier: service_tier_override,
+            account_selection,
             codex_self_exe,
             codex_linux_sandbox_exe,
             main_execve_wrapper_exe,
@@ -4182,6 +4186,7 @@ impl Config {
         let config = Self {
             model,
             service_tier,
+            account_selection,
             review_model,
             model_context_window: cfg.model_context_window,
             model_auto_compact_token_limit: cfg.model_auto_compact_token_limit,

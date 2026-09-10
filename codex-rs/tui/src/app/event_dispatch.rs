@@ -68,6 +68,12 @@ impl App {
         }
 
         match event {
+            AppEvent::ManagedAccounts { args } => self.manage_accounts(app_server, &args),
+            AppEvent::ManagedPools { args } => self.manage_pools(app_server, &args),
+            AppEvent::ManagedAccountOutput { result } => match result {
+                Ok(message) => self.chat_widget.add_info_message(message, /*hint*/ None),
+                Err(message) => self.chat_widget.add_error_message(message),
+            },
             AppEvent::UserVerificationApproved { thread_id, server_name, request_id } => {
                 Box::pin(self.start_user_verification(app_server, thread_id, server_name, request_id)).await?;
             }

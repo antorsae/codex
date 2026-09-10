@@ -56,8 +56,6 @@ use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::LogoutAccountResponse;
 use codex_app_server_protocol::MemoryResetResponse;
 use codex_app_server_protocol::Model as ApiModel;
-use codex_app_server_protocol::ModelListParams;
-use codex_app_server_protocol::ModelListResponse;
 use codex_app_server_protocol::NewThreadModelDefaults;
 use codex_app_server_protocol::RateLimitSnapshot;
 use codex_app_server_protocol::RequestId;
@@ -148,6 +146,10 @@ use codex_utils_path_uri::PathUri;
 use color_eyre::eyre::ContextCompat;
 use color_eyre::eyre::Result;
 use color_eyre::eyre::WrapErr;
+#[cfg(test)]
+#[path = "app_server_session/account_pools_tests.rs"]
+mod account_pools_tests;
+
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -308,6 +310,9 @@ pub(crate) struct AppServerBootstrap {
 
 pub(crate) struct AppServerSession {
     client: AppServerClient,
+    account_selection: Option<codex_protocol::account_pool::AccountSelection>,
+    account_thread_id: Option<String>,
+    pub(crate) managed_accounts_active: bool,
     next_request_id: i64,
     history_pagination: HashMap<ThreadId, history::ThreadHistoryPagination>,
     task_tool_threads: HashSet<ThreadId>,
@@ -410,6 +415,9 @@ impl AppServerSession {
         Self {
             client,
             next_request_id: 1,
+            account_selection: None,
+            account_thread_id: None,
+            managed_accounts_active: false,
             history_pagination: HashMap::new(),
             task_tool_threads: HashSet::new(),
             task_tool_capabilities_dir: None,
@@ -582,24 +590,9 @@ impl AppServerSession {
         let started_at = Instant::now();
         // `hooks/list` holds the global config queue during startup. Submit models and config
         // requirements together so an uncached model fetch can overlap both config requests.
-        let model_request_id = self.next_request_id();
         let requirements_request_id = self.next_request_id();
         let (models, requirements, collaboration_modes) = tokio::try_join!(
-            async {
-                self.client
-                    .request_typed::<ModelListResponse>(ClientRequest::ModelList {
-                        request_id: model_request_id,
-                        params: ModelListParams {
-                            cursor: None,
-                            limit: None,
-                            include_hidden: Some(true),
-                        },
-                    })
-                    .await
-                    .map_err(|err| {
-                        bootstrap_request_error("model/list failed during TUI bootstrap", err)
-                    })
-            },
+            self.selected_models(),
             async {
                 self.client
                     .request_typed::<ConfigRequirementsReadResponse>(
@@ -710,7 +703,59 @@ impl AppServerSession {
     ///
     /// Used by both `bootstrap` (to populate the initial UI) and `get_login_status`
     /// (to check auth mode without the overhead of a full bootstrap).
+    pub(crate) fn set_account_selection(
+        &mut self,
+        selection: Option<codex_protocol::account_pool::AccountSelection>,
+        thread_id: Option<String>,
+    ) {
+        self.account_selection = selection;
+        self.account_thread_id = thread_id;
+    }
+
     pub(crate) async fn read_account(&mut self) -> Result<GetAccountResponse> {
+        use codex_app_server_protocol::ManagedAccountAction;
+        use codex_app_server_protocol::ManagedAccountParams;
+        use codex_app_server_protocol::ManagedAccountResponse;
+        let request_id = self.next_request_id();
+        let managed: std::result::Result<ManagedAccountResponse, _> = self
+            .client
+            .request_typed(ClientRequest::ManagedAccount {
+                request_id,
+                params: ManagedAccountParams {
+                    action: ManagedAccountAction::Resolve,
+                    account_selection: self.account_selection.clone(),
+                    thread_id: self.account_thread_id.clone(),
+                    alias: None,
+                    device_auth: None,
+                    model: None,
+                    cursor: None,
+                    limit: None,
+                },
+            })
+            .await;
+        match managed {
+            Ok(response) => {
+                self.managed_accounts_active = response.resolved.is_some();
+                if let Some(account) = response.resolved {
+                    return Ok(account);
+                }
+            }
+            Err(error) if self.account_selection.is_some() => {
+                return Err(bootstrap_request_error(
+                    "Named account resolution failed",
+                    error,
+                ));
+            }
+            Err(TypedRequestError::Server { source, .. })
+                if source.code == JSONRPC_METHOD_NOT_FOUND => {}
+            Err(error) => {
+                return Err(bootstrap_request_error(
+                    "Managed account resolution failed",
+                    error,
+                ));
+            }
+        }
+
         let account_request_id = self.next_request_id();
         self.client
             .request_typed(ClientRequest::GetAccount {
@@ -835,6 +880,7 @@ impl AppServerSession {
         if history_support == ThreadHistorySupport::LegacyOnly {
             self.history_support = ThreadHistorySupport::LegacyOnly;
         }
+        self.account_thread_id = Some(response.thread.id.clone());
         let mut started = started_thread_from_start_response(
             response,
             local_settings,
@@ -1048,6 +1094,7 @@ impl AppServerSession {
                 "preserving the created fork after bounded history hydration failed"
             );
         }
+        self.account_thread_id = Some(response.thread.id.clone());
         let mut started = started_thread_from_fork_response(
             response,
             local_settings,
@@ -2062,6 +2109,7 @@ pub(crate) fn thread_start_params_from_config(
         })
         .flatten();
     ThreadStartParams {
+        account_selection: config.account_selection.clone(),
         model: config.model.clone(),
         model_provider: thread_params_mode.model_provider_from_config(config),
         service_tier: service_tier_override_from_config(config),
@@ -2128,6 +2176,7 @@ fn thread_resume_params_from_config(
         }
     };
     let mut params = ThreadResumeParams {
+        account_selection: config.account_selection.clone(),
         thread_id: thread_id.to_string(),
         model,
         model_provider,
@@ -2172,6 +2221,7 @@ fn thread_fork_params_from_config(
         })
         .flatten();
     ThreadForkParams {
+        account_selection: config.account_selection.clone(),
         thread_id: thread_id.to_string(),
         model: config.model.clone(),
         model_provider: thread_params_mode.model_provider_from_config(&config),
@@ -2563,7 +2613,7 @@ mod tests {
 
         let bootstrap = app_server.bootstrap_with_account(&config, account).await?;
 
-        assert_eq!(app_server.next_request_id, next_request_id + 2);
+        assert_eq!(app_server.next_request_id, next_request_id + 1);
         assert_eq!(
             (
                 bootstrap.account_email.as_deref(),

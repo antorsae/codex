@@ -85,7 +85,6 @@ use codex_history::RolloutItem;
 use codex_history::RolloutLine;
 use codex_login::default_client::set_default_client_residency_requirement;
 use codex_login::default_client::set_default_originator;
-use codex_login::enforce_login_restrictions;
 use codex_login::is_workload_identity_selected;
 use codex_model_provider_info::LMSTUDIO_OSS_PROVIDER_ID;
 use codex_model_provider_info::OLLAMA_OSS_PROVIDER_ID;
@@ -279,7 +278,10 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
     } = cli;
     let mut shared = shared.into_inner();
     shared.take_auto_review_config_overrides(&mut config_overrides);
+    let account_selection = shared.account_selection();
     let SharedCliOptions {
+        account: _,
+        pool: _,
         images,
         model: model_cli_arg,
         oss,
@@ -561,6 +563,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
     };
 
     let overrides = ConfigOverrides {
+        account_selection,
         model,
         review_model: None,
         // Default to never ask for approvals in headless mode. Rebuild below if
@@ -626,7 +629,9 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
     set_default_client_residency_requirement(config.enforce_residency.value());
 
     if !is_workload_identity_selected()
-        && let Err(err) = enforce_login_restrictions(&config.auth_config()).await
+        && !matches!(command, Some(ExecCommand::Resume(_) | ExecCommand::Fork(_)))
+        && let Err(err) =
+            codex_core::enforce_account_selection_restrictions(&config, /*resume_id*/ None).await
     {
         eprintln!("{err}");
         std::process::exit(1);
@@ -983,6 +988,10 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         if let Some(thread_id) =
             resolve_resume_thread_id(&client, &config, state_db.as_ref(), args).await?
         {
+            if !is_workload_identity_selected() {
+                codex_core::enforce_account_selection_restrictions(&config, Some(&thread_id))
+                    .await?;
+            }
             let response: ThreadResumeResponse = send_request_with_response(
                 &client,
                 ClientRequest::ThreadResume {
@@ -1002,6 +1011,12 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     .map_err(anyhow::Error::msg)?;
             (session_configured.thread_id, session_configured)
         } else {
+            if !is_workload_identity_selected() {
+                codex_core::enforce_account_selection_restrictions(
+                    &config, /*resume_id*/ None,
+                )
+                .await?;
+            }
             let response = start_thread(&client, &mut request_ids, &config, &thread_source)
                 .await
                 .map_err(anyhow::Error::msg)?;
@@ -1022,6 +1037,10 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             resolve_resume_thread_id(&client, &config, state_db.as_ref(), &source_args)
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("Session not found: {}", args.session_id))?;
+        if !is_workload_identity_selected() {
+            codex_core::enforce_account_selection_restrictions(&config, Some(&source_thread_id))
+                .await?;
+        }
         let permissions = permissions_selection_from_config(&config);
         let sandbox = permissions.is_none().then(|| {
             sandbox_mode_from_permission_profile(
@@ -1034,6 +1053,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             ClientRequest::ThreadFork {
                 request_id: request_ids.next(),
                 params: ThreadForkParams {
+                    account_selection: config.account_selection.clone(),
                     thread_id: source_thread_id,
                     model: config.model.clone(),
                     model_provider: Some(config.model_provider_id.clone()),
@@ -1353,6 +1373,7 @@ fn thread_start_params_from_config(
         )
     });
     ThreadStartParams {
+        account_selection: config.account_selection.clone(),
         model: config.model.clone(),
         model_provider: Some(config.model_provider_id.clone()),
         cwd: Some(config.cwd.to_string_lossy().to_string()),
@@ -1382,6 +1403,7 @@ fn thread_resume_params_from_config(
         )
     });
     ThreadResumeParams {
+        account_selection: config.account_selection.clone(),
         thread_id,
         model: config.model.clone(),
         model_provider: Some(config.model_provider_id.clone()),
@@ -1581,6 +1603,7 @@ fn should_process_notification(
 ) -> bool {
     match notification {
         ServerNotification::ConfigWarning(_) | ServerNotification::DeprecationNotice(_) => true,
+        ServerNotification::ThreadAccountPool(notification) => notification.thread_id == thread_id,
         // TODO(anp) resolve duplicate startup warnings
         ServerNotification::Warning(notification) => notification
             .thread_id

@@ -41,6 +41,7 @@ async fn collaboration_catalog_is_optional_and_refetched_on_bootstrap() -> Resul
                 };
                 let mut reply = match request.method.as_str() {
                     "initialize" => json!({"result": {"userAgent": "catalog-test/1.0.0"}}),
+                    "account/manage" => json!({"error":{"code":-32601,"message":"Unknown method"}}),
                     "account/read" => {
                         json!({"result": {"account": null, "requiresOpenaiAuth": false}})
                     }

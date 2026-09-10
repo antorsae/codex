@@ -59,6 +59,10 @@ pub(super) async fn reconnect(
                 .with_local_codex_home(&config.codex_home)
                 .with_remote_cwd_override(remote_cwd.clone())
                 .with_thread_tool_transport(task_tools.clone());
+            session.set_account_selection(
+                config.account_selection.clone(),
+                thread_id.map(|id| id.to_string()),
+            );
             let bootstrap = session.bootstrap(&config).await?;
             let thread = if let Some(thread_id) = thread_id {
                 match session
@@ -417,6 +421,7 @@ impl App {
             server.reconnect(app_server.request_handle(), self.app_event_tx.clone());
         }
         self.reconnect.offline = false;
+        self.chat_widget.managed_accounts_active = app_server.managed_accounts_active;
         self.chat_widget.update_account_state(
             bootstrap.status_account_display,
             bootstrap.plan_type,

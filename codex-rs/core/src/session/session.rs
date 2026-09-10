@@ -796,6 +796,9 @@ impl Session {
                 ));
             }
         };
+        if let Some(pool) = thread_extension_init.get::<Arc<codex_account_pools::PoolSession>>() {
+            pool.bind_thread(&thread_id.to_string()).await?;
+        }
         let resumed_session_id = match &initial_history {
             InitialHistory::Resumed(resumed) => {
                 resumed.history.iter().find_map(|item| match item {

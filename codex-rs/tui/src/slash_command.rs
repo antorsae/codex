@@ -54,6 +54,8 @@ pub enum SlashCommand {
     #[strum(to_string = "pwd", serialize = "cwd")]
     Pwd,
     Usage,
+    Accounts,
+    Pools,
     DebugConfig,
     Title,
     Statusline,
@@ -114,6 +116,8 @@ impl SlashCommand {
             SlashCommand::Cd => "change the current working directory",
             SlashCommand::Pwd => "show the current working directory",
             SlashCommand::Usage => "view account usage or use a usage limit reset",
+            SlashCommand::Accounts => "manage named ChatGPT accounts and view their quota",
+            SlashCommand::Pools => "manage account pools and their quota recovery policy",
             SlashCommand::DebugConfig => "show config layers and requirement sources for debugging",
             SlashCommand::Title => "configure which items appear in the terminal title",
             SlashCommand::Statusline => "configure which items appear in the status line",
@@ -178,6 +182,8 @@ impl SlashCommand {
                 | SlashCommand::Cd
                 | SlashCommand::Pwd
                 | SlashCommand::Usage
+                | SlashCommand::Accounts
+                | SlashCommand::Pools
                 | SlashCommand::Pets
                 | SlashCommand::Side
                 | SlashCommand::Btw
@@ -241,6 +247,8 @@ impl SlashCommand {
             | SlashCommand::Status
             | SlashCommand::Pwd
             | SlashCommand::Usage
+            | SlashCommand::Accounts
+            | SlashCommand::Pools
             | SlashCommand::DebugConfig
             | SlashCommand::Ps
             | SlashCommand::Stop

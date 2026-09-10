@@ -5,7 +5,11 @@
 // the TUI or the tracing stack).
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
+mod account_pool_stream;
+mod account_pools;
 mod apply_patch;
+pub use account_pools::enforce_selection_restrictions as enforce_account_selection_restrictions;
+pub use account_pools::initialize as initialize_account_pool;
 mod apps;
 mod client;
 mod client_common;

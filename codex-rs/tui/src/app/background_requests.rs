@@ -82,6 +82,13 @@ impl App {
         app_server: &AppServerSession,
         origin: RateLimitRefreshOrigin,
     ) {
+        if self.chat_widget.managed_accounts_active {
+            if let RateLimitRefreshOrigin::StatusCommand { request_id } = origin {
+                self.chat_widget
+                    .finish_status_rate_limit_refresh(request_id, Vec::new());
+            }
+            return;
+        }
         if matches!(
             origin,
             RateLimitRefreshOrigin::Recovery | RateLimitRefreshOrigin::ResetConsume { .. }
