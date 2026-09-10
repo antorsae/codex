@@ -47,7 +47,12 @@ impl SessionTask for CompactTask {
                     "remote_v2",
                     /*manual*/ true,
                 );
-                crate::compact_remote_v2::run_remote_compact_task(session.clone(), ctx, &cancellation_token).await
+                crate::compact_remote_v2::run_remote_compact_task(
+                    session.clone(),
+                    ctx,
+                    &cancellation_token,
+                )
+                .await
             }
             RemoteCompactionSupport::V2 => {
                 emit_compact_metric(
@@ -55,7 +60,12 @@ impl SessionTask for CompactTask {
                     "remote",
                     /*manual*/ true,
                 );
-                crate::compact_remote::run_remote_compact_task(session.clone(), ctx, &cancellation_token).await
+                crate::compact_remote::run_remote_compact_task(
+                    session.clone(),
+                    ctx,
+                    &cancellation_token,
+                )
+                .await
             }
             RemoteCompactionSupport::Unsupported => {
                 emit_compact_metric(
@@ -73,7 +83,8 @@ impl SessionTask for CompactTask {
                     // Compaction prompt is synthesized; no UI element ranges to preserve.
                     text_elements: Vec::new(),
                 }];
-                crate::compact::run_compact_task(session.clone(), ctx, input, &cancellation_token).await
+                crate::compact::run_compact_task(session.clone(), ctx, input, &cancellation_token)
+                    .await
             }
         };
         if let Err(err) = result

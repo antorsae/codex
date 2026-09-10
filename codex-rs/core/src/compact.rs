@@ -1,7 +1,7 @@
 use crate::context::GuardianContextMode;
 use std::sync::Arc;
-use tokio_util::sync::CancellationToken;
 use std::time::Instant;
+use tokio_util::sync::CancellationToken;
 
 use crate::Prompt;
 use crate::client::ModelClientSession;

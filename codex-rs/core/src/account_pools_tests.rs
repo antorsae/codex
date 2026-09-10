@@ -53,10 +53,9 @@ async fn account_pool_compaction_cancellation_prevents_quota_reads_and_retry(
         CodexAuth::create_dummy_chatgpt_auth_for_testing(),
         Vec::new(),
         move |config| {
-            config.codex_home = codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(
-                config_home.path(),
-            )
-            .expect("temporary home is absolute");
+            config.codex_home =
+                codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(config_home.path())
+                    .expect("temporary home is absolute");
             config.chatgpt_base_url = uri.clone();
             config.model_provider.base_url = Some(format!("{uri}/v1"));
             config.model_provider.supports_websockets = false;
@@ -72,9 +71,13 @@ async fn account_pool_compaction_cancellation_prevents_quota_reads_and_retry(
         },
     )
     .await;
-    let pool = super::initialize(&turn.config, &session.services.auth_manager, /*resume_id*/ None)
-        .await?
-        .expect("managed pool selected");
+    let pool = super::initialize(
+        &turn.config,
+        &session.services.auth_manager,
+        /*resume_id*/ None,
+    )
+    .await?
+    .expect("managed pool selected");
     session.services.thread_extension_data.insert(pool);
     session
         .record_conversation_items(
@@ -118,30 +121,63 @@ async fn account_pool_compaction_cancellation_prevents_quota_reads_and_retry(
             let step = session.capture_step_context(turn, &cancellation).await?;
             let client = &mut session.services.model_client.new_session();
             match compaction {
-                Compaction::InlineLegacy => crate::compact_remote::run_inline_remote_auto_compact_task(
-                    session, step, /*fallback_step_context*/ None, client,
-                    InitialContextInjection::DoNotInject, CompactionReason::ContextLimit,
-                    CompactionPhase::MidTurn, &cancellation,
-                ).await,
-                Compaction::InlineV2 => crate::compact_remote_v2::run_inline_remote_auto_compact_task(
-                    session, step, /*fallback_step_context*/ None, client,
-                    InitialContextInjection::DoNotInject, CompactionReason::ContextLimit,
-                    CompactionPhase::MidTurn, &cancellation,
-                ).await,
-                Compaction::ManualLegacy | Compaction::ManualV2 | Compaction::Local => unreachable!(),
+                Compaction::InlineLegacy => {
+                    crate::compact_remote::run_inline_remote_auto_compact_task(
+                        session,
+                        step,
+                        /*fallback_step_context*/ None,
+                        client,
+                        InitialContextInjection::DoNotInject,
+                        CompactionReason::ContextLimit,
+                        CompactionPhase::MidTurn,
+                        &cancellation,
+                    )
+                    .await
+                }
+                Compaction::InlineV2 => {
+                    crate::compact_remote_v2::run_inline_remote_auto_compact_task(
+                        session,
+                        step,
+                        /*fallback_step_context*/ None,
+                        client,
+                        InitialContextInjection::DoNotInject,
+                        CompactionReason::ContextLimit,
+                        CompactionPhase::MidTurn,
+                        &cancellation,
+                    )
+                    .await
+                }
+                Compaction::ManualLegacy | Compaction::ManualV2 | Compaction::Local => {
+                    unreachable!()
+                }
             }
         }
-        Compaction::Local => crate::compact::run_compact_task(
-            session, turn, vec![UserInput::Text {
-                text: "Summarize this observation.".to_owned(), text_elements: Vec::new(),
-            }], &cancellation,
-        ).await,
+        Compaction::Local => {
+            crate::compact::run_compact_task(
+                session,
+                turn,
+                vec![UserInput::Text {
+                    text: "Summarize this observation.".to_owned(),
+                    text_elements: Vec::new(),
+                }],
+                &cancellation,
+            )
+            .await
+        }
     };
-    assert!(matches!(result.unwrap_err().details(), CodexErrorDetails::TurnAborted));
+    assert!(matches!(
+        result.unwrap_err().details(),
+        CodexErrorDetails::TurnAborted
+    ));
     assert_eq!(
-        server.received_requests().await.unwrap().iter()
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
             .skip_while(|request| request.url.path() != endpoint)
-            .map(|request| request.url.path().to_owned()).collect::<Vec<_>>(),
+            .map(|request| request.url.path().to_owned())
+            .collect::<Vec<_>>(),
         vec![endpoint.to_owned()],
         "cancelled compaction must not start quota reads, redemption or another request",
     );

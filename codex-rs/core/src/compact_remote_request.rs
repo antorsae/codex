@@ -88,26 +88,28 @@ pub(super) async fn run_remote_compact_attempt(
     .await?;
     let new_history = loop {
         let result = sess
-        .services
-        .model_client
-        .compact_conversation_history(
-            &prompt,
-            turn_context.model_info(),
-            Some(client_session.turn_state()),
-            CompactConversationRequestSettings {
-                effort: turn_context.reasoning_effort().cloned(),
-                summary: turn_context.reasoning_summary(),
-                service_tier: if sess.services.auth_manager.auth_mode() == Some(AuthMode::ApiKey) {
-                    None
-                } else {
-                    step_context.settings.service_tier.clone()
+            .services
+            .model_client
+            .compact_conversation_history(
+                &prompt,
+                turn_context.model_info(),
+                Some(client_session.turn_state()),
+                CompactConversationRequestSettings {
+                    effort: turn_context.reasoning_effort().cloned(),
+                    summary: turn_context.reasoning_summary(),
+                    service_tier: if sess.services.auth_manager.auth_mode()
+                        == Some(AuthMode::ApiKey)
+                    {
+                        None
+                    } else {
+                        step_context.settings.service_tier.clone()
+                    },
                 },
-            },
-            &turn_context.session_telemetry,
-            compaction_trace,
-            &responses_metadata,
-        )
-        .await;
+                &turn_context.session_telemetry,
+                compaction_trace,
+                &responses_metadata,
+            )
+            .await;
         match result {
             Ok(history) => break history,
             Err(error) if matches!(error.details(), CodexErrorDetails::UsageLimitReached(_)) => {

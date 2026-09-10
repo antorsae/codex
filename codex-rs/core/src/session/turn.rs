@@ -2901,11 +2901,8 @@ async fn try_run_sampling_request(
             .is_some()
         && let Some(item) = partial_assistant.take()
     {
-        sess.record_conversation_items(
-            &turn_context,
-            std::slice::from_ref(&item),
-        )
-        .await;
+        sess.record_conversation_items(&turn_context, std::slice::from_ref(&item))
+            .await;
         if let Some(item) = crate::parse_turn_item(&item) {
             sess.emit_turn_item_completed(&turn_context, item).await;
         }
