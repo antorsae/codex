@@ -322,6 +322,7 @@ use crate::status_indicator_widget::STATUS_DETAILS_DEFAULT_MAX_LINES;
 use crate::status_indicator_widget::StatusDetailsCapitalization;
 use crate::text_formatting::truncate_text;
 use crate::tui::FrameRequester;
+mod capacity_retry;
 mod command_lifecycle;
 mod connector_mentions;
 mod connectors;
@@ -800,6 +801,7 @@ pub(crate) struct ChatWidget {
     external_editor_state: ExternalEditorState,
     last_rendered_user_message_display: Option<UserMessageDisplay>,
     last_non_retry_error: Option<(String, String)>,
+    capacity_retry: capacity_retry::CapacityRetryState,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -1178,6 +1180,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn pre_draw_tick(&mut self) {
+        self.retry_capacity_if_due();
         self.update_due_hook_visibility();
         self.schedule_hook_timer_if_needed();
         self.bottom_pane.pre_draw_tick();

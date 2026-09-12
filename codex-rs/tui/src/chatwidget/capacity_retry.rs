@@ -1,0 +1,138 @@
+//! Bounded, unattended retries of capacity failures through normal visible user turns.
+
+use super::*;
+
+const MAX_CAPACITY_RETRIES: u8 = 10;
+
+#[derive(Default)]
+pub(super) struct CapacityRetryState {
+    pub(super) attempts: u8,
+    last_failed_turn: Option<String>,
+    pub(super) pending: Option<PendingCapacityRetry>,
+}
+
+pub(super) struct PendingCapacityRetry {
+    pub(super) deadline: tokio::time::Instant,
+    thread_id: ThreadId,
+    turn_id: String,
+    model: String,
+}
+
+impl CapacityRetryState {
+    pub(super) fn reset(&mut self) {
+        self.attempts = 0;
+        self.pending = None;
+        // Keep the dedupe key so a repeated completion cannot undo cancellation.
+    }
+}
+
+impl ChatWidget {
+    pub(crate) fn cancel_capacity_retry_on_key(&mut self, key: KeyEvent) -> bool {
+        if key.kind == KeyEventKind::Release || self.capacity_retry.pending.is_none() {
+            return false;
+        }
+        self.cancel_capacity_retry();
+        self.chat_keymap.interrupt_turn.is_pressed(key)
+            || key_hint::ctrl(KeyCode::Char('c')).is_press(key)
+    }
+
+    fn capacity_retry_input_is_idle(&self) -> bool {
+        self.is_session_configured()
+            && !self.blocks_direct_input
+            && !self.is_user_turn_pending_or_running()
+            && !self.has_misalignment_policy_violation()
+            && !self.has_queued_follow_up_messages()
+            && self.input_queue.pending_steers.is_empty()
+            && !self.input_queue.suppress_queue_autosend
+            && !self.input_queue.rate_limit_recovery_pending
+            && !self.input_queue.recovered_queue
+            && self.bottom_pane.composer_is_empty()
+            && !self.bottom_pane.is_in_paste_burst()
+            && self.bottom_pane.no_modal_or_popup_active()
+            && self.external_editor_state == ExternalEditorState::Closed
+    }
+
+    pub(super) fn schedule_capacity_retry(&mut self, turn_id: String) {
+        if self.capacity_retry.last_failed_turn.as_ref() == Some(&turn_id) {
+            return;
+        }
+        self.capacity_retry.last_failed_turn = Some(turn_id.clone());
+        if !self.capacity_retry_input_is_idle()
+            || self.turn_lifecycle.last_turn_id.as_ref() != Some(&turn_id)
+        {
+            self.capacity_retry.reset();
+            return;
+        }
+        if self.capacity_retry.attempts >= MAX_CAPACITY_RETRIES {
+            self.add_info_message(
+                "Automatic capacity retries stopped after 10 attempts.".to_string(),
+                /*hint*/ None,
+            );
+            return;
+        }
+        let Some(thread_id) = self.thread_id else {
+            return;
+        };
+        let delay_secs = rand::random_range(10..=60);
+        let delay = Duration::from_secs(delay_secs);
+        let attempt = self.capacity_retry.attempts + 1;
+        self.capacity_retry.pending = Some(PendingCapacityRetry {
+            deadline: tokio::time::Instant::now() + delay,
+            thread_id,
+            turn_id,
+            model: self.current_model().to_string(),
+        });
+        self.add_info_message(
+            format!(
+                "Auto-retry {attempt}/{MAX_CAPACITY_RETRIES}: sending \"continue\" in {delay_secs}s. Typing or Esc cancels."
+            ),
+            /*hint*/ None,
+        );
+        self.frame_requester.schedule_frame_in(delay);
+    }
+
+    pub(super) fn cancel_capacity_retry(&mut self) {
+        if self.capacity_retry.pending.is_some() {
+            self.capacity_retry.reset();
+            self.add_info_message(
+                "Automatic capacity retry canceled.".to_string(),
+                /*hint*/ None,
+            );
+        }
+    }
+
+    pub(super) fn retry_capacity_if_due(&mut self) {
+        let Some(pending) = self.capacity_retry.pending.as_ref() else {
+            return;
+        };
+        if self.thread_id != Some(pending.thread_id)
+            || self.turn_lifecycle.last_turn_id.as_ref() != Some(&pending.turn_id)
+            || self.current_model() != pending.model
+            || !self.capacity_retry_input_is_idle()
+        {
+            self.cancel_capacity_retry();
+            return;
+        }
+        let remaining = pending
+            .deadline
+            .saturating_duration_since(tokio::time::Instant::now());
+        if !remaining.is_zero() {
+            self.frame_requester.schedule_frame_in(remaining);
+            return;
+        }
+
+        // Ordinary submission resets manual retry sequences. Preserve this sequence only
+        // when its own automatic prompt is accepted through that same submission path.
+        let mut retry = std::mem::take(&mut self.capacity_retry);
+        retry.pending = None;
+        if self.submit_user_message_with_history_record(
+            "continue".into(),
+            UserMessageHistoryRecord::UserMessageText,
+        ) {
+            retry.attempts += 1;
+            self.capacity_retry = retry;
+        } else {
+            self.capacity_retry.last_failed_turn = retry.last_failed_turn;
+        }
+    }
+}

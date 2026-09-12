@@ -307,6 +307,18 @@ impl ChatWidget {
         notification: TurnCompletedNotification,
         replay_kind: Option<ReplayKind>,
     ) {
+        let overloaded_turn = (replay_kind.is_none()
+            && notification.turn.status == TurnStatus::Failed
+            && notification.turn.error.as_ref().is_some_and(|error| {
+                error.codex_error_info == Some(AppServerCodexErrorInfo::ServerOverloaded)
+            }))
+        .then(|| notification.turn.id.clone());
+        if replay_kind.is_none()
+            && notification.turn.status != TurnStatus::InProgress
+            && overloaded_turn.is_none()
+        {
+            self.capacity_retry.reset();
+        }
         // User-message dedupe only suppresses the app-server echo of a prompt
         // this TUI already rendered locally. Once that turn ends, another
         // client can submit the same text and it still needs its own user cell.
@@ -390,6 +402,9 @@ impl ChatWidget {
             TurnStatus::InProgress => {}
         }
         self.thread_usage.replaying_turn_completion = was_replaying_turn_completion;
+        if let Some(turn_id) = overloaded_turn {
+            self.schedule_capacity_retry(turn_id);
+        }
     }
 
     fn handle_item_started_notification(

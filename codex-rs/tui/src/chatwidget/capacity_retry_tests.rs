@@ -1,0 +1,355 @@
+use super::*;
+use pretty_assertions::assert_eq;
+
+fn capacity_failure(chat: &ChatWidget, turn_id: &str) -> TurnCompletedNotification {
+    TurnCompletedNotification {
+        thread_id: chat.thread_id.unwrap().to_string(),
+        turn: app_server_turn(
+            turn_id,
+            AppServerTurnStatus::Failed,
+            /*duration_ms*/ None,
+            Some(AppServerTurnError {
+                message: "Selected model is at capacity. Please try a different model.".into(),
+                codex_error_info: Some(CodexErrorInfo::ServerOverloaded),
+                additional_details: None,
+                misalignment: None,
+            }),
+        ),
+    }
+}
+
+fn fail_at_capacity(chat: &mut ChatWidget, turn_id: &str) {
+    handle_turn_started(chat, turn_id);
+    chat.handle_server_notification(
+        ServerNotification::TurnCompleted(capacity_failure(chat, turn_id)),
+        /*replay_kind*/ None,
+    );
+}
+
+#[tokio::test]
+async fn capacity_retry_waits_then_submits_visible_continue_and_stops_on_success() {
+    let (mut chat, mut rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    tokio::time::pause();
+    handle_turn_started(&mut chat, "original");
+    let failure = capacity_failure(&chat, "original");
+    chat.handle_server_notification(
+        ServerNotification::Error(ErrorNotification {
+            thread_id: failure.thread_id.clone(),
+            turn_id: failure.turn.id.clone(),
+            error: failure.turn.error.clone().unwrap(),
+            will_retry: false,
+        }),
+        /*replay_kind*/ None,
+    );
+    assert!(chat.capacity_retry.pending.is_none());
+    chat.handle_server_notification(
+        ServerNotification::TurnCompleted(failure.clone()),
+        /*replay_kind*/ None,
+    );
+    let deadline = chat.capacity_retry.pending.as_ref().unwrap().deadline;
+    let delay = deadline - tokio::time::Instant::now();
+    assert!((Duration::from_secs(10)..=Duration::from_secs(60)).contains(&delay));
+    tokio::time::advance(delay - Duration::from_millis(1)).await;
+    chat.pre_draw_tick();
+    assert_no_submit_op(&mut ops);
+
+    // Duplicate terminal notifications must neither add an attempt nor move the timer.
+    chat.handle_server_notification(
+        ServerNotification::TurnCompleted(failure),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(
+        chat.capacity_retry.pending.as_ref().unwrap().deadline,
+        deadline
+    );
+    tokio::time::advance(Duration::from_millis(1)).await;
+    chat.pre_draw_tick();
+    let Op::UserTurn { items, model, .. } = next_submit_op(&mut ops) else {
+        unreachable!();
+    };
+    assert_eq!(
+        (items, model),
+        (
+            vec![UserInput::Text {
+                text: "continue".into(),
+                text_elements: Vec::new(),
+            }],
+            chat.current_model().to_string(),
+        )
+    );
+    let rendered = drain_insert_history(&mut rx)
+        .into_iter()
+        .map(|lines| lines_to_single_string(&lines))
+        .collect::<String>()
+        .replace(&format!("{}s", delay.as_secs()), "[delay]s");
+    insta::assert_snapshot!("capacity_retry_visible_continue", rendered);
+
+    handle_turn_started(&mut chat, "retry-1");
+    handle_turn_completed(&mut chat, "retry-1", /*duration_ms*/ None);
+    tokio::time::advance(Duration::from_secs(600)).await;
+    chat.pre_draw_tick();
+    assert_no_submit_op(&mut ops);
+    assert_eq!(chat.capacity_retry.attempts, 0);
+}
+
+#[tokio::test]
+async fn capacity_retry_stops_after_ten_visible_attempts() {
+    let (mut chat, mut rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    tokio::time::pause();
+    let mut prompts = Vec::new();
+    for attempt in 0..10 {
+        fail_at_capacity(&mut chat, &format!("turn-{attempt}"));
+        tokio::time::advance(Duration::from_secs(60)).await;
+        chat.pre_draw_tick();
+        let Op::UserTurn { items, .. } = next_submit_op(&mut ops) else {
+            unreachable!();
+        };
+        prompts.push(items);
+    }
+    assert_eq!(
+        prompts,
+        vec![
+            vec![UserInput::Text {
+                text: "continue".into(),
+                text_elements: Vec::new(),
+            }];
+            10
+        ]
+    );
+    let mut visible_prompts = 0;
+    while let Ok(event) = rx.try_recv() {
+        if let AppEvent::InsertHistoryCell(cell) = event
+            && cell.as_any().is::<UserHistoryCell>()
+        {
+            visible_prompts += 1;
+        }
+    }
+    assert_eq!(visible_prompts, 10);
+    fail_at_capacity(&mut chat, "turn-10");
+    tokio::time::advance(Duration::from_secs(600)).await;
+    chat.pre_draw_tick();
+    assert_no_submit_op(&mut ops);
+    assert!(chat.capacity_retry.pending.is_none());
+    let rendered = drain_insert_history(&mut rx)
+        .into_iter()
+        .map(|lines| lines_to_single_string(&lines))
+        .collect::<String>();
+    insta::assert_snapshot!("capacity_retry_exhausted", rendered);
+
+    chat.submit_user_message("try again".into());
+    next_submit_op(&mut ops);
+    fail_at_capacity(&mut chat, "manual-turn");
+    tokio::time::advance(Duration::from_secs(60)).await;
+    chat.pre_draw_tick();
+    next_submit_op(&mut ops);
+    assert_eq!(chat.capacity_retry.attempts, 1);
+    handle_turn_started(&mut chat, "retry-after-manual-turn");
+    handle_turn_interrupted(&mut chat, "retry-after-manual-turn");
+    tokio::time::advance(Duration::from_secs(60)).await;
+    chat.pre_draw_tick();
+    assert_no_submit_op(&mut ops);
+}
+
+#[tokio::test]
+async fn capacity_retry_renders_before_dispatch_and_records_prompt_history() {
+    let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.codex_op_target = CodexOpTarget::AppEvent;
+    tokio::time::pause();
+    fail_at_capacity(&mut chat, "original");
+    drain_insert_history(&mut rx);
+    tokio::time::advance(Duration::from_secs(60)).await;
+    chat.pre_draw_tick();
+    let mut observed = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        match event {
+            AppEvent::InsertHistoryCell(cell) if cell.as_any().is::<UserHistoryCell>() => {
+                observed.push((
+                    "visible",
+                    lines_to_single_string(&cell.display_lines(/*width*/ 80)),
+                ));
+            }
+            AppEvent::CodexOp(Op::UserTurn { items, .. }) => {
+                assert_eq!(
+                    items,
+                    vec![UserInput::Text {
+                        text: "continue".into(),
+                        text_elements: Vec::new(),
+                    }]
+                );
+                observed.push(("dispatch", "continue".into()));
+            }
+            AppEvent::AppendMessageHistoryEntry { text, .. } => observed.push(("history", text)),
+            _ => {}
+        }
+    }
+    assert_eq!(
+        observed,
+        vec![
+            ("visible", "\n› continue\n\n".into()),
+            ("dispatch", "continue".into()),
+            ("history", "continue".into()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn capacity_retry_cancels_on_typing_paste_escape_or_ctrl_c() {
+    for (index, key) in [
+        KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (mut chat, _rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
+        chat.thread_id = Some(ThreadId::new());
+        tokio::time::pause();
+        let turn_id = format!("turn-{index}");
+        fail_at_capacity(&mut chat, &turn_id);
+        assert!(chat.capacity_retry.pending.is_some());
+        chat.handle_key_event(key);
+        assert!(chat.capacity_retry.pending.is_none());
+        chat.bottom_pane
+            .set_composer_text(String::new(), Vec::new(), Vec::new());
+        // Clearing a draft and receiving a duplicate failure must not re-arm the retry.
+        chat.handle_server_notification(
+            ServerNotification::TurnCompleted(capacity_failure(&chat, &turn_id)),
+            /*replay_kind*/ None,
+        );
+        tokio::time::advance(Duration::from_secs(60)).await;
+        chat.pre_draw_tick();
+        assert_no_submit_op(&mut ops);
+        tokio::time::resume();
+    }
+    let (mut chat, mut rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    tokio::time::pause();
+    fail_at_capacity(&mut chat, "paste");
+    assert!(chat.capacity_retry.pending.is_some());
+    drain_insert_history(&mut rx);
+    chat.handle_paste("my draft".into());
+    tokio::time::advance(Duration::from_secs(60)).await;
+    chat.pre_draw_tick();
+    assert_no_submit_op(&mut ops);
+    assert_eq!(chat.bottom_pane.composer_text(), "my draft");
+    let rendered = drain_insert_history(&mut rx)
+        .into_iter()
+        .map(|lines| lines_to_single_string(&lines))
+        .collect::<String>();
+    insta::assert_snapshot!("capacity_retry_canceled", rendered);
+}
+
+#[tokio::test]
+async fn capacity_retry_preserves_existing_drafts_and_queued_input() {
+    let (mut chat, _rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    tokio::time::pause();
+    chat.handle_paste("my draft".into());
+    fail_at_capacity(&mut chat, "draft");
+    tokio::time::advance(Duration::from_secs(60)).await;
+    chat.pre_draw_tick();
+    assert_no_submit_op(&mut ops);
+    assert_eq!(chat.bottom_pane.composer_text(), "my draft");
+
+    chat.bottom_pane
+        .set_composer_text(String::new(), Vec::new(), Vec::new());
+    handle_turn_started(&mut chat, "queued");
+    chat.queue_user_message("my next request".into());
+    chat.handle_server_notification(
+        ServerNotification::TurnCompleted(capacity_failure(&chat, "queued")),
+        /*replay_kind*/ None,
+    );
+    let Op::UserTurn { items, .. } = next_submit_op(&mut ops) else {
+        unreachable!();
+    };
+    assert_eq!(
+        items,
+        vec![UserInput::Text {
+            text: "my next request".into(),
+            text_elements: Vec::new(),
+        }]
+    );
+    tokio::time::advance(Duration::from_secs(60)).await;
+    chat.pre_draw_tick();
+    assert_no_submit_op(&mut ops);
+}
+
+#[tokio::test]
+async fn capacity_retry_rechecks_draft_thread_model_and_active_turn_before_sending() {
+    enum Change {
+        Draft,
+        Thread,
+        Model,
+        Turn,
+        Disconnect,
+    }
+    let (mut chat, _rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    tokio::time::pause();
+    for (index, change) in [
+        Change::Draft,
+        Change::Thread,
+        Change::Model,
+        Change::Turn,
+        Change::Disconnect,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        fail_at_capacity(&mut chat, &format!("turn-{index}"));
+        assert!(chat.capacity_retry.pending.is_some());
+        match change {
+            Change::Draft => {
+                chat.bottom_pane
+                    .set_composer_text("restored draft".into(), Vec::new(), Vec::new())
+            }
+            Change::Thread => chat.thread_id = Some(ThreadId::new()),
+            Change::Model => chat.set_model("other-model"),
+            Change::Turn => handle_turn_started(&mut chat, "other-client-turn"),
+            Change::Disconnect => chat.pause_for_disconnect(),
+        }
+        tokio::time::advance(Duration::from_secs(60)).await;
+        chat.pre_draw_tick();
+        assert_no_submit_op(&mut ops);
+        assert!(chat.capacity_retry.pending.is_none());
+        chat.bottom_pane
+            .set_composer_text(String::new(), Vec::new(), Vec::new());
+    }
+}
+
+#[tokio::test]
+async fn capacity_retry_ignores_replay_and_other_errors() {
+    let (mut chat, _rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    tokio::time::pause();
+    for replay in [
+        ReplayKind::ResumeInitialMessages,
+        ReplayKind::ThreadSnapshot,
+    ] {
+        let failure = capacity_failure(&chat, "historical");
+        chat.replay_thread_turns(vec![failure.turn], replay);
+        tokio::time::advance(Duration::from_secs(60)).await;
+        chat.pre_draw_tick();
+        assert_no_submit_op(&mut ops);
+    }
+    fail_at_capacity(&mut chat, "original");
+    tokio::time::advance(Duration::from_secs(60)).await;
+    chat.pre_draw_tick();
+    next_submit_op(&mut ops);
+    handle_turn_started(&mut chat, "retry-1");
+    let mut failure = capacity_failure(&chat, "retry-1");
+    failure.turn.error.as_mut().unwrap().codex_error_info =
+        Some(CodexErrorInfo::InternalServerError);
+    chat.handle_server_notification(
+        ServerNotification::TurnCompleted(failure),
+        /*replay_kind*/ None,
+    );
+    tokio::time::advance(Duration::from_secs(600)).await;
+    chat.pre_draw_tick();
+    assert_no_submit_op(&mut ops);
+    assert_eq!(chat.capacity_retry.attempts, 0);
+}

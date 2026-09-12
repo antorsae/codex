@@ -271,6 +271,7 @@ impl ChatWidget {
             external_editor_state: ExternalEditorState::Closed,
             last_rendered_user_message_display: None,
             last_non_retry_error: None,
+            capacity_retry: capacity_retry::CapacityRetryState::default(),
         };
 
         widget.prefetch_rate_limits();
