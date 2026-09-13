@@ -188,6 +188,9 @@ impl ChatWidget {
                     self.rate_limit_snapshots_by_limit_id.clear();
                     self.account_status.select(account.clone());
                     self.refresh_status_surfaces();
+                    if !from_replay {
+                        self.finish_rate_limit_recovery();
+                    }
                 } else {
                     self.add_info_message(notification.event.to_string(), /*hint*/ None);
                 }

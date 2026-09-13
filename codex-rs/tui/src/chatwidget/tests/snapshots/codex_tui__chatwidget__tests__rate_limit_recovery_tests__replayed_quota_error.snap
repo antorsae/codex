@@ -1,0 +1,5 @@
+---
+source: tui/src/chatwidget/tests/rate_limit_recovery_tests.rs
+expression: history
+---
+■ You've hit your usage limit.

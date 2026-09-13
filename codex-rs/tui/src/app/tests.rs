@@ -1,5 +1,7 @@
 //! App-level orchestration tests for the TUI.
 
+#[path = "tests/account_pool_recovery_tests.rs"]
+mod account_pool_recovery_tests;
 #[path = "tests/account_pools_tests.rs"]
 mod account_pools_tests;
 

@@ -220,7 +220,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn finish_rate_limit_recovery(&mut self) {
-        if self.waiting_for_luna_reserve() {
+        if !self.managed_accounts_active && self.waiting_for_luna_reserve() {
             return;
         }
         if std::mem::take(&mut self.input_queue.rate_limit_recovery_pending) {

@@ -87,6 +87,12 @@ impl App {
                 self.chat_widget
                     .finish_status_rate_limit_refresh(request_id, Vec::new());
             }
+            if matches!(
+                origin,
+                RateLimitRefreshOrigin::Recovery | RateLimitRefreshOrigin::ResetConsume { .. }
+            ) {
+                self.chat_widget.finish_rate_limit_recovery();
+            }
             return;
         }
         if matches!(
