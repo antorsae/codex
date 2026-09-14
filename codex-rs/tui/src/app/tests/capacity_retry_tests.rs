@@ -45,6 +45,12 @@ async fn capacity_retry_sends_native_turn_with_current_settings() -> Result<()> 
             }),
             /*replay_kind*/ None,
         );
+        // A cached active turn must not route empty retry input through turn/steer.
+        app.ensure_thread_channel(thread_id)
+            .store
+            .lock()
+            .await
+            .set_active_turn_id("original".into());
         tokio::time::advance(Duration::from_secs(60)).await;
         app.chat_widget.pre_draw_tick();
         let retry = next_user_turn_op(&mut ops);
@@ -55,13 +61,13 @@ async fn capacity_retry_sends_native_turn_with_current_settings() -> Result<()> 
             .await?;
 
         let sent = requests.lock().unwrap().clone();
-        let turn_starts = sent
-            .iter()
-            .filter(|request| request.method == "turn/start")
-            .collect::<Vec<_>>();
-        assert_eq!(turn_starts.len(), 1);
-        let request: TurnStartParams =
-            serde_json::from_value(turn_starts[0].params.clone().unwrap())?;
+        assert_eq!(
+            sent.iter()
+                .map(|request| request.method.as_str())
+                .collect::<Vec<_>>(),
+            ["turn/start"],
+        );
+        let request: TurnStartParams = serde_json::from_value(sent[0].params.clone().unwrap())?;
         assert_eq!(
             (
                 request.thread_id,

@@ -691,7 +691,10 @@ impl App {
                 personality,
             } => {
                 let mut should_start_turn = true;
-                if let Some(turn_id) = self.active_turn_id_for_thread(thread_id).await {
+                // Native retries have no user input, which turn/steer cannot accept.
+                if !items.is_empty()
+                    && let Some(turn_id) = self.active_turn_id_for_thread(thread_id).await
+                {
                     let mut steer_turn_id = turn_id;
                     let mut retried_after_turn_mismatch = false;
                     loop {
