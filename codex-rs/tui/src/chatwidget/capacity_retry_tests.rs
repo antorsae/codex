@@ -30,7 +30,7 @@ fn fail_at_capacity(chat: &mut ChatWidget, turn_id: &str) {
 }
 
 #[tokio::test]
-async fn capacity_retry_waits_then_submits_visible_continue_and_stops_on_success() {
+async fn capacity_retry_waits_then_submits_empty_turn_and_stops_on_success() {
     let (mut chat, mut rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     tokio::time::pause();
@@ -73,20 +73,18 @@ async fn capacity_retry_waits_then_submits_visible_continue_and_stops_on_success
     };
     assert_eq!(
         (items, model),
-        (
-            vec![UserInput::Text {
-                text: "continue".into(),
-                text_elements: Vec::new(),
-            }],
-            chat.current_model().to_string(),
-        )
+        (Vec::new(), chat.current_model().to_string(),)
     );
     let rendered = drain_insert_history(&mut rx)
         .into_iter()
         .map(|lines| lines_to_single_string(&lines))
         .collect::<String>()
         .replace(&format!("{}s", delay.as_secs()), "[delay]s");
-    insta::assert_snapshot!("capacity_retry_visible_continue", rendered);
+    insta::assert_snapshot!("capacity_retry_native", rendered);
+    assert!(chat.is_user_turn_pending_or_running());
+    // Drawing again while turn/start is pending must not dispatch another retry.
+    chat.pre_draw_tick();
+    assert_no_submit_op(&mut ops);
 
     handle_turn_started(&mut chat, "retry-1");
     handle_turn_completed(&mut chat, "retry-1", /*duration_ms*/ None);
@@ -199,13 +197,7 @@ async fn capacity_retry_restarts_after_progress_before_turn_completion() {
         let Op::UserTurn { items, .. } = next_submit_op(&mut ops) else {
             unreachable!();
         };
-        assert_eq!(
-            items,
-            vec![UserInput::Text {
-                text: "continue".into(),
-                text_elements: Vec::new(),
-            }]
-        );
+        assert_eq!(items, Vec::<UserInput>::new());
         assert_eq!(chat.capacity_retry.attempts, 1);
         if matches!(progress, Progress::FileChange) {
             let rendered = drain_insert_history(&mut rx)
@@ -312,11 +304,11 @@ async fn capacity_retry_ignores_non_progress_replay_and_unrelated_turns() {
 }
 
 #[tokio::test]
-async fn capacity_retry_stops_after_ten_visible_attempts() {
+async fn capacity_retry_stops_after_ten_native_attempts() {
     let (mut chat, mut rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     tokio::time::pause();
-    let mut prompts = Vec::new();
+    let mut inputs = Vec::new();
     for attempt in 0..10 {
         fail_at_capacity(&mut chat, &format!("turn-{attempt}"));
         tokio::time::advance(Duration::from_secs(60)).await;
@@ -324,27 +316,10 @@ async fn capacity_retry_stops_after_ten_visible_attempts() {
         let Op::UserTurn { items, .. } = next_submit_op(&mut ops) else {
             unreachable!();
         };
-        prompts.push(items);
+        inputs.push(items);
     }
-    assert_eq!(
-        prompts,
-        vec![
-            vec![UserInput::Text {
-                text: "continue".into(),
-                text_elements: Vec::new(),
-            }];
-            10
-        ]
-    );
-    let mut visible_prompts = 0;
-    while let Ok(event) = rx.try_recv() {
-        if let AppEvent::InsertHistoryCell(cell) = event
-            && cell.as_any().is::<UserHistoryCell>()
-        {
-            visible_prompts += 1;
-        }
-    }
-    assert_eq!(visible_prompts, 10);
+    assert_eq!(inputs, vec![Vec::<UserInput>::new(); 10]);
+    drain_insert_history(&mut rx);
     fail_at_capacity(&mut chat, "turn-10");
     tokio::time::advance(Duration::from_secs(600)).await;
     chat.pre_draw_tick();
@@ -371,7 +346,7 @@ async fn capacity_retry_stops_after_ten_visible_attempts() {
 }
 
 #[tokio::test]
-async fn capacity_retry_renders_before_dispatch_and_records_prompt_history() {
+async fn capacity_retry_dispatches_empty_input_without_recording_a_prompt() {
     let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.codex_op_target = CodexOpTarget::AppEvent;
@@ -390,27 +365,43 @@ async fn capacity_retry_renders_before_dispatch_and_records_prompt_history() {
                 ));
             }
             AppEvent::CodexOp(Op::UserTurn { items, .. }) => {
-                assert_eq!(
-                    items,
-                    vec![UserInput::Text {
-                        text: "continue".into(),
-                        text_elements: Vec::new(),
-                    }]
-                );
-                observed.push(("dispatch", "continue".into()));
+                assert_eq!(items, Vec::<UserInput>::new());
+                observed.push(("dispatch", String::new()));
             }
             AppEvent::AppendMessageHistoryEntry { text, .. } => observed.push(("history", text)),
             _ => {}
         }
     }
+    assert_eq!(observed, vec![("dispatch", String::new())]);
+}
+
+#[tokio::test]
+async fn capacity_retry_start_rejection_releases_pending_turn_and_preserves_draft() {
+    let (mut chat, _rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    tokio::time::pause();
+    fail_at_capacity(&mut chat, "original");
+    tokio::time::advance(Duration::from_secs(60)).await;
+    chat.pre_draw_tick();
+    next_submit_op(&mut ops);
+    assert!(chat.is_user_turn_pending_or_running());
+    chat.handle_paste("my next request".into());
+    assert!(chat.handle_turn_start_rejection("Failed to start turn".into()));
+    assert!(!chat.is_user_turn_pending_or_running());
+    assert_eq!(chat.bottom_pane.composer_text(), "my next request");
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    let Op::UserTurn { items, .. } = next_submit_op(&mut ops) else {
+        unreachable!();
+    };
     assert_eq!(
-        observed,
-        vec![
-            ("visible", "\n› continue\n\n".into()),
-            ("dispatch", "continue".into()),
-            ("history", "continue".into()),
-        ]
+        items,
+        vec![UserInput::Text {
+            text: "my next request".into(),
+            text_elements: Vec::new(),
+        }]
     );
+    assert!(chat.input_queue.queued_user_messages.is_empty());
 }
 
 #[tokio::test]

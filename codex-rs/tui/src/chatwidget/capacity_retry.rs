@@ -1,4 +1,4 @@
-//! Bounded, unattended retries of capacity failures through normal visible user turns.
+//! Bounded, unattended retries of capacity failures without adding user messages.
 
 use super::*;
 
@@ -164,7 +164,7 @@ impl ChatWidget {
         });
         self.add_info_message(
             format!(
-                "Auto-retry {attempt}/{MAX_CAPACITY_RETRIES}: sending \"continue\" in {delay_secs}s. Typing or Esc cancels."
+                "Auto-retry {attempt}/{MAX_CAPACITY_RETRIES}: retrying in {delay_secs}s. Typing or Esc cancels."
             ),
             /*hint*/ None,
         );
@@ -201,18 +201,16 @@ impl ChatWidget {
             return;
         }
 
-        // Ordinary submission resets manual retry sequences. Preserve this sequence only
-        // when its own automatic prompt is accepted through that same submission path.
-        let mut retry = std::mem::take(&mut self.capacity_retry);
-        retry.pending = None;
-        if self.submit_user_message_with_history_record(
-            "continue".into(),
-            UserMessageHistoryRecord::UserMessageText,
-        ) {
-            retry.attempts += 1;
-            self.capacity_retry = retry;
+        // Empty turn input resumes inference from the existing conversation without
+        // rendering a user cell or recording a synthetic prompt in message history.
+        self.capacity_retry.pending = None;
+        let op = self.user_turn_command(uuid::Uuid::new_v4().to_string(), Vec::new());
+        if self.submit_op(op) {
+            self.capacity_retry.attempts += 1;
+            self.input_queue.user_turn_pending_start = true;
+            self.dismiss_backend_banner_for_new_turn();
         } else {
-            self.capacity_retry.last_failed_turn = retry.last_failed_turn;
+            self.capacity_retry.reset();
         }
     }
 }

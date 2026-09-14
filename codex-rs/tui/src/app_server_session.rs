@@ -1384,8 +1384,8 @@ impl AppServerSession {
                 request_id,
                 params: TurnStartParams {
                     thread_id: thread_id.to_string(),
-                    turn_trigger: None,
-                    client_user_message_id: Some(client_user_message_id),
+                    turn_trigger: items.is_empty().then(|| "retry".to_string()),
+                    client_user_message_id: (!items.is_empty()).then_some(client_user_message_id),
                     input: items,
                     tool_output: None,
                     responsesapi_client_metadata: None,

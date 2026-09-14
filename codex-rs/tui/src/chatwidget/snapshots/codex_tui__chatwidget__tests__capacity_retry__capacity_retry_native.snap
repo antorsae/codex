@@ -4,9 +4,6 @@ expression: rendered
 ---
 ⚠ Selected model is at capacity. Please try a different model.
 
-• Auto-retry 1/10: sending "continue" in [delay]s. Typing or Esc cancels.
+• Auto-retry 1/10: retrying in [delay]s. Typing or Esc cancels.
 
 ⚠ Selected model is at capacity. Please try a different model.
-
-
-› continue
