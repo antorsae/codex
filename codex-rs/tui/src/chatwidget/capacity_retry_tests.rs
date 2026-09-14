@@ -1,4 +1,7 @@
 use super::*;
+use codex_app_server_protocol::AgentMessageDeltaNotification;
+use codex_app_server_protocol::PlanDeltaNotification;
+use codex_app_server_protocol::ReasoningTextDeltaNotification;
 use pretty_assertions::assert_eq;
 
 fn capacity_failure(chat: &ChatWidget, turn_id: &str) -> TurnCompletedNotification {
@@ -91,6 +94,221 @@ async fn capacity_retry_waits_then_submits_visible_continue_and_stops_on_success
     chat.pre_draw_tick();
     assert_no_submit_op(&mut ops);
     assert_eq!(chat.capacity_retry.attempts, 0);
+}
+
+#[tokio::test]
+async fn capacity_retry_restarts_after_progress_before_turn_completion() {
+    enum Progress {
+        FileChange,
+        Command,
+        Message,
+        Reasoning,
+        RawReasoning,
+        Plan,
+        CompletedMessage,
+    }
+
+    for progress in [
+        Progress::FileChange,
+        Progress::Command,
+        Progress::Message,
+        Progress::Reasoning,
+        Progress::RawReasoning,
+        Progress::Plan,
+        Progress::CompletedMessage,
+    ] {
+        let (mut chat, mut rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
+        chat.thread_id = Some(ThreadId::new());
+        tokio::time::pause();
+        for attempt in 0..6 {
+            fail_at_capacity(&mut chat, &format!("failed-{attempt}"));
+            tokio::time::advance(Duration::from_secs(60)).await;
+            chat.pre_draw_tick();
+            next_submit_op(&mut ops);
+        }
+        handle_turn_started(&mut chat, "working");
+        assert_eq!(chat.capacity_retry.attempts, 6);
+        let thread_id = chat.thread_id.unwrap().to_string();
+        match progress {
+            Progress::FileChange => handle_patch_apply_end(
+                &mut chat,
+                "patch",
+                "working",
+                HashMap::from([(
+                    PathBuf::from("example.py"),
+                    FileChange::Add {
+                        content: "print('working')\n".into(),
+                    },
+                )]),
+                AppServerPatchApplyStatus::Completed,
+            ),
+            Progress::Command => {
+                begin_exec_with_source(&mut chat, "command", "pwd", ExecCommandSource::Agent);
+            }
+            Progress::Message => handle_agent_message_delta(&mut chat, "I found the issue."),
+            Progress::Reasoning => handle_agent_reasoning_delta(&mut chat, "Checking the fix."),
+            Progress::RawReasoning => chat.handle_server_notification(
+                ServerNotification::ReasoningTextDelta(ReasoningTextDeltaNotification {
+                    thread_id,
+                    turn_id: "working".into(),
+                    item_id: "reasoning".into(),
+                    delta: "Checking the fix.".into(),
+                    content_index: 0,
+                }),
+                /*replay_kind*/ None,
+            ),
+            Progress::Plan => chat.handle_server_notification(
+                ServerNotification::PlanDelta(PlanDeltaNotification {
+                    thread_id,
+                    turn_id: "working".into(),
+                    item_id: "plan".into(),
+                    delta: "Update the retry counter.".into(),
+                }),
+                /*replay_kind*/ None,
+            ),
+            Progress::CompletedMessage => chat.handle_server_notification(
+                ServerNotification::ItemCompleted(ItemCompletedNotification {
+                    thread_id,
+                    turn_id: "working".into(),
+                    completed_at_ms: 0,
+                    item: AppServerThreadItem::AgentMessage {
+                        id: "message".into(),
+                        text: "I found the issue.".into(),
+                        phase: Some(MessagePhase::Commentary),
+                        memory_citation: None,
+                        delivery: None,
+                        questions: None,
+                    },
+                }),
+                /*replay_kind*/ None,
+            ),
+        }
+        assert_eq!(chat.capacity_retry.attempts, 0);
+        assert!(chat.is_agent_turn_running());
+        drain_insert_history(&mut rx);
+
+        // The same turn can hit capacity on its next inference request after doing useful work.
+        chat.handle_server_notification(
+            ServerNotification::TurnCompleted(capacity_failure(&chat, "working")),
+            /*replay_kind*/ None,
+        );
+        let delay =
+            chat.capacity_retry.pending.as_ref().unwrap().deadline - tokio::time::Instant::now();
+        tokio::time::advance(delay).await;
+        chat.pre_draw_tick();
+        let Op::UserTurn { items, .. } = next_submit_op(&mut ops) else {
+            unreachable!();
+        };
+        assert_eq!(
+            items,
+            vec![UserInput::Text {
+                text: "continue".into(),
+                text_elements: Vec::new(),
+            }]
+        );
+        assert_eq!(chat.capacity_retry.attempts, 1);
+        if matches!(progress, Progress::FileChange) {
+            let rendered = drain_insert_history(&mut rx)
+                .into_iter()
+                .map(|lines| lines_to_single_string(&lines))
+                .collect::<String>()
+                .replace(&format!("{}s", delay.as_secs()), "[delay]s");
+            insta::assert_snapshot!("capacity_retry_restarts_after_progress", rendered);
+        }
+        tokio::time::resume();
+    }
+}
+
+#[tokio::test]
+async fn capacity_retry_ignores_non_progress_replay_and_unrelated_turns() {
+    let (mut chat, _rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    let thread_id = ThreadId::new();
+    chat.thread_id = Some(thread_id);
+    tokio::time::pause();
+    fail_at_capacity(&mut chat, "original");
+    tokio::time::advance(Duration::from_secs(60)).await;
+    chat.pre_draw_tick();
+    next_submit_op(&mut ops);
+    handle_turn_started(&mut chat, "retry");
+    complete_user_message(&mut chat, "echo", "continue");
+    for item in [
+        AppServerThreadItem::Reasoning {
+            id: "empty-reasoning".into(),
+            summary: Vec::new(),
+            content: Vec::new(),
+        },
+        AppServerThreadItem::ContextCompaction {
+            id: "compaction".into(),
+        },
+    ] {
+        chat.handle_server_notification(
+            ServerNotification::ItemStarted(ItemStartedNotification {
+                thread_id: thread_id.to_string(),
+                turn_id: "retry".into(),
+                started_at_ms: 0,
+                item,
+            }),
+            /*replay_kind*/ None,
+        );
+    }
+    assert_eq!(chat.capacity_retry.attempts, 1);
+    let progress = AgentMessageDeltaNotification {
+        thread_id: thread_id.to_string(),
+        turn_id: "retry".into(),
+        item_id: "message".into(),
+        delta: "Making progress.".into(),
+    };
+    for replay_kind in [
+        ReplayKind::ResumeInitialMessages,
+        ReplayKind::ThreadSnapshot,
+    ] {
+        chat.handle_server_notification(
+            ServerNotification::AgentMessageDelta(progress.clone()),
+            Some(replay_kind),
+        );
+        assert_eq!(chat.capacity_retry.attempts, 1);
+    }
+    for notification in [
+        AgentMessageDeltaNotification {
+            delta: " \n".into(),
+            ..progress.clone()
+        },
+        AgentMessageDeltaNotification {
+            turn_id: "old-turn".into(),
+            ..progress.clone()
+        },
+        AgentMessageDeltaNotification {
+            thread_id: ThreadId::new().to_string(),
+            ..progress.clone()
+        },
+    ] {
+        chat.handle_server_notification(
+            ServerNotification::AgentMessageDelta(notification),
+            /*replay_kind*/ None,
+        );
+        assert_eq!(chat.capacity_retry.attempts, 1);
+    }
+    chat.handle_server_notification(
+        ServerNotification::TurnCompleted(capacity_failure(&chat, "retry")),
+        /*replay_kind*/ None,
+    );
+    let deadline = chat.capacity_retry.pending.as_ref().unwrap().deadline;
+    // A delayed output event after failure must not clear the count or cancel its timer.
+    chat.handle_server_notification(
+        ServerNotification::AgentMessageDelta(progress),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(
+        (
+            chat.capacity_retry.attempts,
+            chat.capacity_retry.pending.as_ref().unwrap().deadline,
+        ),
+        (1, deadline)
+    );
+    tokio::time::advance(Duration::from_secs(60)).await;
+    chat.pre_draw_tick();
+    next_submit_op(&mut ops);
+    assert_eq!(chat.capacity_retry.attempts, 2);
 }
 
 #[tokio::test]

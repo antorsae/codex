@@ -26,7 +26,87 @@ impl CapacityRetryState {
     }
 }
 
+fn item_has_model_progress(item: &ThreadItem) -> bool {
+    match item {
+        ThreadItem::AgentMessage { text, delivery, .. } => {
+            delivery.is_none() && !text.trim().is_empty()
+        }
+        ThreadItem::Plan { text, .. } => !text.trim().is_empty(),
+        ThreadItem::Reasoning {
+            summary, content, ..
+        } => summary
+            .iter()
+            .chain(content)
+            .any(|text| !text.trim().is_empty()),
+        ThreadItem::CommandExecution { source, .. } => *source != ExecCommandSource::UserShell,
+        ThreadItem::FileChange { .. }
+        | ThreadItem::McpToolCall { .. }
+        | ThreadItem::DynamicToolCall { .. }
+        | ThreadItem::CollabAgentToolCall { .. }
+        | ThreadItem::FunctionCallOutput { .. }
+        | ThreadItem::WebSearch(_)
+        | ThreadItem::ImageView { .. }
+        | ThreadItem::Sleep(_)
+        | ThreadItem::ImageGeneration(_) => true,
+        // These can occur before inference or come from another agent while this model is blocked.
+        ThreadItem::UserMessage { .. }
+        | ThreadItem::HookPrompt { .. }
+        | ThreadItem::SubAgentActivity { .. }
+        | ThreadItem::EnteredReviewMode { .. }
+        | ThreadItem::ExitedReviewMode { .. }
+        | ThreadItem::ContextCompaction { .. } => false,
+    }
+}
+
 impl ChatWidget {
+    pub(super) fn reset_capacity_retry_on_progress(&mut self, notification: &ServerNotification) {
+        if self.capacity_retry.attempts == 0 || !self.is_agent_turn_running() {
+            return;
+        }
+        let (thread_id, turn_id, progressed) = match notification {
+            ServerNotification::AgentMessageDelta(event) => (
+                &event.thread_id,
+                &event.turn_id,
+                !event.delta.trim().is_empty(),
+            ),
+            ServerNotification::PlanDelta(event) => (
+                &event.thread_id,
+                &event.turn_id,
+                !event.delta.trim().is_empty(),
+            ),
+            ServerNotification::ReasoningSummaryTextDelta(event) => (
+                &event.thread_id,
+                &event.turn_id,
+                !event.delta.trim().is_empty(),
+            ),
+            ServerNotification::ReasoningTextDelta(event) => (
+                &event.thread_id,
+                &event.turn_id,
+                !event.delta.trim().is_empty(),
+            ),
+            ServerNotification::ItemStarted(event) => (
+                &event.thread_id,
+                &event.turn_id,
+                item_has_model_progress(&event.item),
+            ),
+            ServerNotification::ItemCompleted(event) => (
+                &event.thread_id,
+                &event.turn_id,
+                item_has_model_progress(&event.item),
+            ),
+            _ => return,
+        };
+        if progressed
+            && self.turn_lifecycle.last_turn_id.as_ref() == Some(turn_id)
+            && self
+                .thread_id
+                .is_some_and(|id| id.to_string() == *thread_id)
+        {
+            // Count failures without model progress, even when a later inference in this turn fails.
+            self.capacity_retry.reset();
+        }
+    }
+
     pub(crate) fn cancel_capacity_retry_on_key(&mut self, key: KeyEvent) -> bool {
         if key.kind == KeyEventKind::Release || self.capacity_retry.pending.is_none() {
             return false;
