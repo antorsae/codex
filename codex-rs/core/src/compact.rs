@@ -318,6 +318,7 @@ async fn run_compact_task_inner_impl(
 
         match attempt_result {
             Ok(response_id) => {
+                crate::account_pools::record_success(&sess).await;
                 break response_id;
             }
             Err(err)

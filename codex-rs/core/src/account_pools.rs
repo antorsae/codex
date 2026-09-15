@@ -22,6 +22,7 @@ pub async fn initialize(
     legacy: &AuthManager,
     resume_id: Option<&str>,
 ) -> anyhow::Result<Option<Arc<PoolSession>>> {
+    let resume_id = resume_id.or(config.account_selection_source_thread_id.as_deref());
     let store = AccountStore::from_config(config);
     let saved = resume_id
         .map(|id| PoolSession::saved_selection(&store, id))
@@ -97,7 +98,17 @@ pub(crate) async fn before_request(
         .thread_extension_data
         .get::<Arc<PoolSession>>()
     {
-        if pool.is_waiting() {
+        let needs_recovery = pool
+            .needs_recovery(model, cancellation)
+            .await
+            .map_err(|error| {
+                if cancellation.is_cancelled() {
+                    CodexErr::TurnAborted
+                } else {
+                    CodexErr::Fatal(error.to_string())
+                }
+            })?;
+        if needs_recovery {
             recover(sess, turn, model, client, cancellation).await?;
         }
         sess.send_event(
@@ -109,6 +120,17 @@ pub(crate) async fn before_request(
         .await;
     }
     Ok(())
+}
+
+pub(crate) async fn record_success(sess: &Session) {
+    if let Some(pool) = sess
+        .services
+        .thread_extension_data
+        .get::<Arc<PoolSession>>()
+        && let Err(error) = pool.record_success().await
+    {
+        tracing::warn!(%error, "Could not remember successful pool account");
+    }
 }
 
 /// Validate the selected credential authority without logging out an unrelated legacy login.

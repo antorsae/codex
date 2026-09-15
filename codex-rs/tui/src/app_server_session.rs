@@ -2080,6 +2080,7 @@ pub(crate) fn thread_start_params_from_config(
         .flatten();
     ThreadStartParams {
         account_selection: config.account_selection.clone(),
+        account_selection_source_thread_id: config.account_selection_source_thread_id.clone(),
         model: config.model.clone(),
         model_provider: thread_params_mode.model_provider_from_config(config),
         service_tier: service_tier_override_from_config(config),

@@ -33,6 +33,9 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+#[path = "continuity.rs"]
+mod continuity;
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct RecoveryState {
     selection: AccountSelection,
@@ -116,6 +119,7 @@ pub struct PoolSession {
     selection: AccountSelection,
     membership: RwLock<PoolMembership>,
     waiting: AtomicBool,
+    needs_preflight: AtomicBool,
     // Metadata reads remain available while recovery holds `denied_until` to wait for quota.
     current: RwLock<ManagedAccount>,
     denied_until: Mutex<HashMap<(String, String), i64>>,
@@ -169,6 +173,7 @@ impl PoolSession {
                     .iter()
                     .position(|account| account.alias == saved.account)
             })
+            .or_else(|| continuity::preferred_account(&store, &selection, accounts))
             .unwrap_or(0);
         let manager = store.manager(&accounts[current]).await?;
         let selected_auth = Arc::new(SessionAuth { current: manager });
@@ -186,6 +191,7 @@ impl PoolSession {
             membership: RwLock::new(membership),
             denied_until: Mutex::new(HashMap::new()),
             waiting,
+            needs_preflight: AtomicBool::new(/*v*/ true),
             current: RwLock::new(current),
             auth,
             recovery_path: RwLock::new(None),
@@ -288,7 +294,9 @@ impl PoolSession {
             cancel,
             notify,
         )
-        .await
+        .await?;
+        self.needs_preflight.store(/*val*/ false, Ordering::Release);
+        Ok(())
     }
 
     #[expect(

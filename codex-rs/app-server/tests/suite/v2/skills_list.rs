@@ -1373,6 +1373,7 @@ async fn skills_changed_notification_is_emitted_after_skill_change() -> Result<(
     let thread_start_request_id = mcp
         .send_thread_start_request_with_auto_env(ThreadStartParams {
             account_selection: None,
+            account_selection_source_thread_id: None,
             model: None,
             model_provider: None,
             allow_provider_model_fallback: false,

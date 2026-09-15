@@ -427,7 +427,10 @@ async fn run_remote_compaction_request_v2(
         };
 
         match result {
-            Ok(compaction_output) => return Ok(compaction_output),
+            Ok(compaction_output) => {
+                crate::account_pools::record_success(sess).await;
+                return Ok(compaction_output);
+            }
             Err(err)
                 if matches!(
                     err.details(),

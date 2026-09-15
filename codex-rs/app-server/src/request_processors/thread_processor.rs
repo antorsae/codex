@@ -1129,6 +1129,7 @@ impl ThreadRequestProcessor {
     ) -> Result<(), JSONRPCErrorError> {
         let ThreadStartParams {
             account_selection,
+            account_selection_source_thread_id,
             model,
             model_provider,
             allow_provider_model_fallback,
@@ -1207,6 +1208,7 @@ impl ThreadRequestProcessor {
         );
         typesafe_overrides.ephemeral = ephemeral;
         typesafe_overrides.account_selection = account_selection;
+        typesafe_overrides.account_selection_source_thread_id = account_selection_source_thread_id;
         let listener_task_context = ListenerTaskContext {
             thread_manager: Arc::clone(&self.thread_manager),
             thread_state_manager: self.thread_state_manager.clone(),

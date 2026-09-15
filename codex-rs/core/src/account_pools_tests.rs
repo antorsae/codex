@@ -47,6 +47,7 @@ async fn account_pool_compaction_cancellation_prevents_quota_reads_and_retry(
     let server = MockServer::start().await;
     let home = Arc::new(TempDir::new()?);
     account_pools::setup(&home, &server).await?;
+    account_pools::mount_initial_available_usage(&server).await;
     let uri = server.uri();
     let config_home = Arc::clone(&home);
     let (session, turn, _events) = make_session_and_context_with_auth_and_config_and_rx(

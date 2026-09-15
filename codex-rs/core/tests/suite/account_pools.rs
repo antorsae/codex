@@ -9,6 +9,9 @@ use std::sync::Arc;
 use tempfile::TempDir;
 use wiremock::MockServer;
 
+#[path = "account_pool_continuity_tests.rs"]
+mod continuity;
+
 async fn recovery_preserves_completed_tools(failure: QuotaFailure) -> Result<()> {
     let server = MockServer::start().await;
     let home = Arc::new(TempDir::new()?);
@@ -125,6 +128,7 @@ async fn account_pool_remote_compaction_recovers_on_the_same_model() -> Result<(
     let server = MockServer::start().await;
     let home = Arc::new(TempDir::new()?);
     account_pools::setup(&home, &server).await?;
+    account_pools::mount_initial_available_usage(&server).await;
     let requests = responses::mount_response_sequence(&server, vec![
         responses::sse_response(responses::sse(vec![responses::ev_completed("before")])),
         wiremock::ResponseTemplate::new(429).set_body_json(json!({"error":{"type":"usage_limit_reached","plan_type":"pro"}})),
@@ -183,6 +187,7 @@ async fn account_pool_websocket_recovery_clears_previous_response_and_sticky_hea
     let usage_server = MockServer::start().await;
     let home = Arc::new(TempDir::new()?);
     account_pools::setup(&home, &usage_server).await?;
+    account_pools::mount_initial_available_usage(&usage_server).await;
     let websocket = responses::start_websocket_server_with_headers(vec![
         responses::WebSocketConnectionConfig {
             requests: vec![vec![responses::ev_response_created("prewarm"), responses::ev_completed("prewarm")],
@@ -248,7 +253,7 @@ async fn account_pool_defaults_preserve_other_auth_and_explicit_selection_wins()
     use codex_login::CodexAuth;
     use core_test_support::responses;
     for (legacy_chatgpt, explicit, provider_bearer, expected) in [
-        (true, false, false, Some("workspace-a")),
+        (true, false, false, Some("workspace-b")),
         (false, false, false, None),
         (false, true, false, Some("workspace-b")),
         (true, false, true, None),
@@ -301,13 +306,14 @@ async fn account_pool_defaults_preserve_other_auth_and_explicit_selection_wins()
                 Some("Bearer legacy-key")
             );
         }
-        assert!(
-            !backend
+        assert_eq!(
+            backend
                 .received_requests()
                 .await
                 .unwrap()
                 .iter()
-                .any(|request| request.url.path() == "/api/codex/usage")
+                .any(|request| request.url.path() == "/api/codex/usage"),
+            !provider_bearer && (legacy_chatgpt || explicit),
         );
     }
     Ok(())
@@ -321,6 +327,7 @@ async fn account_pool_resume_precedence_uses_saved_auth_before_legacy_or_default
     let backend = MockServer::start().await;
     let home = Arc::new(TempDir::new()?);
     account_pools::setup(&home, &backend).await?;
+    account_pools::mount_initial_available_usage(&backend).await;
     let requests = responses::mount_sse_sequence(
         &backend,
         vec![responses::sse(vec![responses::ev_completed("done")]); 3],

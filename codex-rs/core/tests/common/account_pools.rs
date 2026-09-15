@@ -89,7 +89,25 @@ pub enum QuotaFailure {
     PartialStream,
 }
 
+/// Let rejection-recovery tests start with usable quota, then observe exhaustion.
+pub async fn mount_initial_available_usage(server: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path("/api/codex/usage"))
+        .and(header("chatgpt-account-id", "workspace-a"))
+        .respond_with(ResponseTemplate::new(/*s*/ 200).set_body_json(json!({
+            "plan_type": "pro", "rate_limit": {"allowed": true, "limit_reached": false,
+                "primary_window": {"used_percent": 10, "limit_window_seconds": 18000,
+                    "reset_after_seconds": 3600, "reset_at": 2_000_000_000i64}},
+            "rate_limit_reset_credits": {"available_count": 0}
+        })))
+        .with_priority(/*p*/ 1)
+        .up_to_n_times(/*n*/ 1)
+        .mount(server)
+        .await;
+}
+
 pub async fn mount_recovery(server: &MockServer, failure: QuotaFailure) -> responses::ResponseMock {
+    mount_initial_available_usage(server).await;
     let mut first = vec![
         responses::ev_response_created("first"),
         responses::ev_assistant_message("partial", "I am checking the file."),

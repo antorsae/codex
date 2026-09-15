@@ -356,6 +356,13 @@
       ],
       "description": "Session-local selection of a server-managed ChatGPT account or pool."
     },
+    "accountSelectionSourceThreadId": {
+      "description": "Inherit the managed account and pool from an existing conversation. An explicit `accountSelection` takes precedence. This does not copy conversation history.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "approvalPolicy": {
       "anyOf": [
         {

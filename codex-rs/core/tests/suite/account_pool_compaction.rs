@@ -31,6 +31,7 @@ async fn account_pool_legacy_compaction_recovery_clears_account_routing(
     let server = MockServer::start().await;
     let home = Arc::new(TempDir::new()?);
     account_pools::setup(&home, &server).await?;
+    account_pools::mount_initial_available_usage(&server).await;
     let first = match compaction {
         Compaction::Manual => vec![
             responses::ev_assistant_message("before", "Remember this observation."),

@@ -63,6 +63,10 @@ pub struct ThreadStartParams {
     /// Session-local selection of a server-managed ChatGPT account or pool.
     #[ts(optional = nullable)]
     pub account_selection: Option<codex_protocol::account_pool::AccountSelection>,
+    /// Inherit the managed account and pool from an existing conversation. An explicit
+    /// `accountSelection` takes precedence. This does not copy conversation history.
+    #[ts(optional = nullable)]
+    pub account_selection_source_thread_id: Option<String>,
     #[ts(optional = nullable)]
     pub model: Option<String>,
     #[ts(optional = nullable)]

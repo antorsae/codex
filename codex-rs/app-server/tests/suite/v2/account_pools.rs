@@ -15,6 +15,9 @@ use serde_json::json;
 use tempfile::TempDir;
 use wiremock::MockServer;
 
+#[path = "account_pool_continuity_tests.rs"]
+mod continuity;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn account_pool_management_and_partial_stream_recovery() -> Result<()> {
     let backend = MockServer::start().await;
@@ -158,7 +161,14 @@ async fn account_pool_management_and_partial_stream_recovery() -> Result<()> {
     let resolved: ManagedAccountResponse = server.read_response(request).await?;
     assert_eq!(
         (resolved.selected_account, resolved.selected_pool),
-        (second.data.first().cloned(), pools.data.first().cloned())
+        (
+            second.data.first().cloned(),
+            Some(codex_protocol::account_pool::AccountPool {
+                name: "work".into(),
+                accounts: vec!["b".into()],
+                redeem_weekly_resets: false,
+            })
+        )
     );
     let switched = loop {
         let notification: ThreadAccountPoolNotification = server
@@ -193,6 +203,7 @@ async fn account_pool_waiting_interrupt_and_explicit_resume_restore_selection() 
     let backend = MockServer::start().await;
     let home = TempDir::new()?;
     account_pools::setup(&home, &backend).await?;
+    account_pools::mount_initial_available_usage(&backend).await;
     std::fs::write(
         home.path().join("config.toml"),
         format!(
@@ -210,7 +221,7 @@ async fn account_pool_waiting_interrupt_and_explicit_resume_restore_selection() 
             "rate_limit":{"allowed":false,"limit_reached":true,
                 "primary_window":{"used_percent":100,"limit_window_seconds":18000,"reset_after_seconds":3600,"reset_at":2_000_000_000},
                 "secondary_window":{"used_percent":100,"limit_window_seconds":604800,"reset_after_seconds":3600,"reset_at":2_000_000_000}},
-            "rate_limit_reset_credits":{"available_count":0}}))).with_priority(1)
+            "rate_limit_reset_credits":{"available_count":0}}))).with_priority(/*p*/ 2)
         .mount(&backend).await;
     let requests = responses::mount_response_sequence(
         &backend,

@@ -15,6 +15,8 @@ Browser OAuth is the default for `account add`. Import copies the current stored
 
 `--account ALIAS` selects a single account and waits when it runs out of quota. It cannot be combined with `--pool NAME`. Explicit selection overrides a saved session selection, then the user default. Resume and fork restore the saved account within the selected pool. With no explicit or saved selection, defaults apply to locally managed ChatGPT authentication; other authentication modes retain their existing behavior.
 
+Fresh launches prefer the last account that completed a model response in the selected pool. `/clear` and `/new` inherit the current conversation's account and pool, even if another running session has since used a different account. Running sessions retain independent selections; explicit account or pool overrides still take precedence. Before the first inference, known exhaustion enters quota recovery. Unknown usage leaves the selected account in place.
+
 ## Commands
 
 - `account add ALIAS [--device-auth]`, `account import ALIAS`, `account list`, and `account remove ALIAS` manage logins. Remove an account from its pools before deleting it.
@@ -25,11 +27,11 @@ Browser OAuth is the default for `account add`. Import copies the current stored
 - Add `--no-auto-reset` to pool creation or update to wait for weekly recovery without spending banked credits. Updating a pool replaces its ordered membership and reset policy.
 - Account and pool commands support `--json`; read-only list, usage and inspect commands also support `--watch` with a 60-second interval. Interrupt to stop watching.
 
-TUI has `/accounts` and `/pools` with the corresponding commands. `/usage` shows named-account usage when a named selection is active. Account switches, verified redemptions and waiting deadlines appear in the conversation. Pool changes affect future sessions; an existing session retains its own selection and policy.
+TUI has `/accounts` and `/pools` with the corresponding commands. `/usage` shows named-account usage when a named selection is active. Account switches, verified redemptions and waiting deadlines appear in the conversation. Recovery reloads pool membership and policy from a complete configuration snapshot, including accounts added while waiting. Existing sessions retain their selected pool when the default changes.
 
 ## Recovery policy
 
-The current account remains selected until a model request is blocked. An alternative must have fresh usage, support the current model and have capacity in every applicable window reported by the backend, including model-specific limits. Accounts with only a short or only a weekly ordinary quota window are supported. Candidates rank by remaining quota in the exhausted window; weekly exhaustion takes precedence. Pool order breaks ties.
+The current account remains selected until the initial quota check or a model request reports exhaustion. An alternative must have fresh usage, support the current model and have capacity in every applicable window reported by the backend, including model-specific limits. Accounts with only a short or only a weekly ordinary quota window are supported. Candidates rank by remaining quota in the exhausted window; weekly exhaustion takes precedence. Pool order breaks ties.
 
 When all otherwise eligible accounts are weekly exhausted, automatic reset policy chooses the account with the most banked resets and its earliest-expiring usable credit. A short-window block with weekly capacity remaining waits without spending a reset. Failed or incomplete usage reads cannot authorize switching or redemption. Backend window durations, model availability, credit expiry and reset outcomes are authoritative.
 
@@ -40,6 +42,8 @@ Recovery happens at a model-request boundary after outstanding tool work settles
 ## Storage and safety
 
 User-only definitions live in `$CODEX_HOME/accounts/accounts.json`. Repository configuration cannot supply account or pool definitions. Credentials use the existing file, keyring or auto credential store under identity-specific homes; ephemeral credential storage cannot persist named accounts. No credential values are included in account/pool API responses or usage errors.
+
+The optional `$CODEX_HOME/accounts/pool-state.json` stores one remembered account per pool. Successful responses update it under the existing configuration lock with atomic replacement; it contains no credentials and cannot change the configured default. Existing per-conversation recovery files remain authoritative for resume and conversation handoff.
 
 Configuration writes, token refreshes and reset redemptions use interprocess locks. A durable reset intent and idempotency key are written before a request is sent. A timeout or process death leaves that intent available for reconciliation with the same credit and key. A successful reset must produce verified usable quota before another reset generation can begin. If usage remains stale, recovery waits rather than consuming another credit. These guarantees require a local filesystem that supports advisory locks and atomic replacement.
 

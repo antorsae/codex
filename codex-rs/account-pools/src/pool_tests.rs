@@ -35,6 +35,9 @@ use wiremock::matchers::path;
 #[path = "pool_reload_tests.rs"]
 mod pool_reload;
 
+#[path = "continuity_tests.rs"]
+mod continuity;
+
 pub(super) fn account(alias: &str) -> ManagedAccount {
     ManagedAccount {
         alias: alias.to_owned(),

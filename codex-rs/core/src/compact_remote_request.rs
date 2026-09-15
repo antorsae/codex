@@ -111,7 +111,10 @@ pub(super) async fn run_remote_compact_attempt(
             )
             .await;
         match result {
-            Ok(history) => break history,
+            Ok(history) => {
+                crate::account_pools::record_success(sess).await;
+                break history;
+            }
             Err(error) if matches!(error.details(), CodexErrorDetails::UsageLimitReached(_)) => {
                 if !crate::account_pools::recover(
                     sess,

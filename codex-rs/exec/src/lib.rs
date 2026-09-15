@@ -563,6 +563,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
     };
 
     let overrides = ConfigOverrides {
+        account_selection_source_thread_id: None,
         account_selection,
         model,
         review_model: None,

@@ -619,6 +619,7 @@ impl Session {
             crate::account_pools::initialize(&config, &auth_manager, resume_id.as_deref())
                 .await
                 .map_err(|error| CodexErr::Fatal(error.to_string()))?;
+        config.account_selection_source_thread_id = None;
         let (auth_manager, models_manager) = if let Some(pool) = pool_session {
             config.account_selection = Some(pool.selection().clone());
             let auth = pool.auth_manager();

@@ -2685,6 +2685,7 @@ async fn try_run_sampling_request(
                 usage_metadata,
                 end_turn,
             } => {
+                crate::account_pools::record_success(&sess).await;
                 sess.services
                     .analytics_events_client
                     .track_code_mode_tool_call(
