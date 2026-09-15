@@ -191,6 +191,14 @@ impl App {
 
         let harness_overrides =
             normalize_harness_overrides_for_cwd(harness_overrides, &config.cwd)?;
+        if let SessionSelection::Resume(target) | SessionSelection::Fork(target) =
+            &session_selection
+        {
+            app_server.set_account_selection(
+                config.account_selection.clone(),
+                Some(target.thread_id.to_string()),
+            );
+        }
         let bootstrap = match startup_bootstrap {
             Some(bootstrap) => bootstrap,
             None => match startup_draft
@@ -420,6 +428,7 @@ impl App {
                     session_telemetry: session_telemetry.clone(),
                 };
                 let mut chat_widget = ChatWidget::new_with_app_event(init);
+                chat_widget.managed_accounts_active = app_server.managed_accounts_active;
                 chat_widget.set_queue_submissions_until_session_configured(
                     /*queue*/ !start_in_agents_overview,
                 );
@@ -659,6 +668,11 @@ See the Codex keymap documentation for supported actions and examples."
         #[cfg(not(debug_assertions))]
         let upgrade_version = crate::updates::get_upgrade_version(&config);
 
+        chat_widget.managed_accounts_active = app_server.managed_accounts_active;
+        chat_widget.initialize_managed_account_status(
+            app_server.selected_managed_account.clone(),
+            app_server.selected_managed_pool.clone(),
+        );
         let mut app = Self {
             feature_write_lock: Arc::default(),
             model_catalog,
@@ -878,7 +892,7 @@ See the Codex keymap documentation for supported actions and examples."
         // Kick off a non-blocking rate-limit prefetch so the first `/status`
         // already has data and available reset credits can be surfaced, without
         // delaying the initial frame render.
-        if requires_openai_auth && has_chatgpt_account {
+        if requires_openai_auth && has_chatgpt_account && !app.chat_widget.managed_accounts_active {
             crate::daybreak::prefetch_notice(
                 &app.config,
                 &app_server,

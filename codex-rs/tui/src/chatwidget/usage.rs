@@ -15,6 +15,13 @@ const RATE_LIMIT_RESET_CONFIRMATION_VIEW_ID: &str = "rate-limit-reset-confirmati
 
 impl ChatWidget {
     pub(super) fn open_usage_menu(&mut self) {
+        if self.managed_accounts_active {
+            self.add_account_pool_command(SlashCommand::Usage, "");
+            self.app_event_tx.send(AppEvent::ManagedAccounts {
+                args: "usage".to_owned(),
+            });
+            return;
+        }
         self.clear_pending_rate_limit_reset_hint();
         let should_refresh_reset_availability = self.available_rate_limit_reset_credits == Some(0);
         self.bottom_pane

@@ -2135,6 +2135,54 @@
             },
             "method": {
               "enum": [
+                "account/manage"
+              ],
+              "title": "Account/manageRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ManagedAccountParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Account/manageRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
+                "pool/manage"
+              ],
+              "title": "Pool/manageRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ManagedPoolParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Pool/manageRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
                 "account/rateLimitResetCredit/consume"
               ],
               "title": "Account/rateLimitResetCredit/consumeRequestMethod",
@@ -5407,6 +5455,26 @@
           "properties": {
             "method": {
               "enum": [
+                "thread/accountPool/updated"
+              ],
+              "title": "Thread/accountPool/updatedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadAccountPoolNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Thread/accountPool/updatedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "app/list/updated"
               ],
               "title": "App/list/updatedNotificationMethod",
@@ -6623,6 +6691,163 @@
         "title": "AccountLoginCompletedNotification",
         "type": "object"
       },
+      "AccountPool": {
+        "properties": {
+          "accounts": {
+            "description": "Ordered aliases. The order breaks quota and reset-credit ties.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 128,
+            "minItems": 1,
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "redeemWeeklyResets": {
+            "description": "Use existing banked credits only when every eligible account is weekly exhausted.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accounts",
+          "name",
+          "redeemWeeklyResets"
+        ],
+        "type": "object"
+      },
+      "AccountPoolEvent": {
+        "oneOf": [
+          {
+            "properties": {
+              "account": {
+                "$ref": "#/definitions/v2/ManagedAccount"
+              },
+              "type": {
+                "enum": [
+                  "selected"
+                ],
+                "title": "SelectedAccountPoolEventType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "account",
+              "type"
+            ],
+            "title": "SelectedAccountPoolEvent",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "account": {
+                "type": "string"
+              },
+              "previousAccount": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "switched"
+                ],
+                "title": "SwitchedAccountPoolEventType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "account",
+              "previousAccount",
+              "type"
+            ],
+            "title": "SwitchedAccountPoolEvent",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "account": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "redeemed"
+                ],
+                "title": "RedeemedAccountPoolEventType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "account",
+              "type"
+            ],
+            "title": "RedeemedAccountPoolEvent",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "account": {
+                "type": "string"
+              },
+              "nextCheckAt": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "reason": {
+                "$ref": "#/definitions/v2/PoolWaitReason"
+              },
+              "type": {
+                "enum": [
+                  "waiting"
+                ],
+                "title": "WaitingAccountPoolEventType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "account",
+              "nextCheckAt",
+              "reason",
+              "type"
+            ],
+            "title": "WaitingAccountPoolEvent",
+            "type": "object"
+          }
+        ]
+      },
+      "AccountQuotaWindow": {
+        "properties": {
+          "limitId": {
+            "type": "string"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remainingPercent": {
+            "format": "double",
+            "type": "number"
+          },
+          "resetsAt": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "windowMinutes": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "limitId",
+          "remainingPercent",
+          "windowMinutes"
+        ],
+        "type": "object"
+      },
       "AccountRateLimitsUpdatedNotification": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "description": "Sparse rolling rate-limit update.\n\nClients should merge available values into the most recent `account/rateLimits/read` response or refetch that snapshot. Nullable account metadata may be unavailable in a rolling update and does not clear a previously observed value.",
@@ -6636,6 +6861,50 @@
         ],
         "title": "AccountRateLimitsUpdatedNotification",
         "type": "object"
+      },
+      "AccountSelection": {
+        "oneOf": [
+          {
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "account"
+                ],
+                "title": "AccountAccountSelectionType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "type"
+            ],
+            "title": "AccountAccountSelection",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "pool"
+                ],
+                "title": "PoolAccountSelectionType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "type"
+            ],
+            "title": "PoolAccountSelection",
+            "type": "object"
+          }
+        ]
       },
       "AccountTokenUsageDailyBucket": {
         "properties": {
@@ -7929,6 +8198,24 @@
             ]
           }
         },
+        "type": "object"
+      },
+      "BankedReset": {
+        "properties": {
+          "expiresAt": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
         "type": "object"
       },
       "BrowserUseAccessApprovalLifetime": {
@@ -13984,6 +14271,403 @@
         "title": "LogoutAccountResponse",
         "type": "object"
       },
+      "ManagedAccount": {
+        "properties": {
+          "alias": {
+            "type": "string"
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "plan": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "userId": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "alias",
+          "userId",
+          "workspaceId"
+        ],
+        "type": "object"
+      },
+      "ManagedAccountAction": {
+        "enum": [
+          "add",
+          "import",
+          "list",
+          "select",
+          "remove",
+          "usage",
+          "redeem",
+          "resolve",
+          "models"
+        ],
+        "type": "string"
+      },
+      "ManagedAccountParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "accountSelection": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/AccountSelection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Session selection for `resolve`; omitted selection uses saved state or the user default."
+          },
+          "action": {
+            "$ref": "#/definitions/v2/ManagedAccountAction"
+          },
+          "alias": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "deviceAuth": {
+            "description": "Use device-code login for `add`; defaults to browser OAuth.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "limit": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "threadId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "ManagedAccountParams",
+        "type": "object"
+      },
+      "ManagedAccountResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/definitions/v2/ManagedAccount"
+            },
+            "type": "array"
+          },
+          "defaultSelection": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/AccountSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "login": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "properties": {
+                      "type": {
+                        "enum": [
+                          "apiKey"
+                        ],
+                        "title": "ApiKeyv2::ManagedAccountResponseType",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "title": "ApiKeyv2::ManagedAccountResponse",
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "authUrl": {
+                        "description": "URL the client should open in a browser to initiate the OAuth flow.",
+                        "type": "string"
+                      },
+                      "loginId": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "chatgpt"
+                        ],
+                        "title": "Chatgptv2::ManagedAccountResponseType",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "authUrl",
+                      "loginId",
+                      "type"
+                    ],
+                    "title": "Chatgptv2::ManagedAccountResponse",
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "loginId": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "chatgptDeviceCode"
+                        ],
+                        "title": "ChatgptDeviceCodev2::ManagedAccountResponseType",
+                        "type": "string"
+                      },
+                      "userCode": {
+                        "description": "One-time code the user must enter after signing in.",
+                        "type": "string"
+                      },
+                      "verificationUrl": {
+                        "description": "URL the client should open in a browser to complete device code authorization.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "loginId",
+                      "type",
+                      "userCode",
+                      "verificationUrl"
+                    ],
+                    "title": "ChatgptDeviceCodev2::ManagedAccountResponse",
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "type": {
+                        "enum": [
+                          "chatgptAuthTokens"
+                        ],
+                        "title": "ChatgptAuthTokensv2::ManagedAccountResponseType",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "title": "ChatgptAuthTokensv2::ManagedAccountResponse",
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "type": {
+                        "enum": [
+                          "amazonBedrock"
+                        ],
+                        "title": "AmazonBedrockv2::ManagedAccountResponseType",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "title": "AmazonBedrockv2::ManagedAccountResponse",
+                    "type": "object"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "models": {
+            "items": {
+              "$ref": "#/definitions/v2/Model"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resolved": {
+            "anyOf": [
+              {
+                "properties": {
+                  "account": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/definitions/v2/Account"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "requiresOpenaiAuth": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "requiresOpenaiAuth"
+                ],
+                "title": "RequiresOpenaiAuthv2::ManagedAccountResponse",
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null means this selection uses legacy authentication."
+          },
+          "selectedAccount": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/ManagedAccount"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Identity selected by `resolve` or `models`, without credentials."
+          },
+          "selectedPool": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/AccountPool"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Session pool membership and policy for `resolve` or `models`; null for single accounts."
+          },
+          "usage": {
+            "items": {
+              "$ref": "#/definitions/v2/ManagedAccountUsage"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "login",
+          "resolved",
+          "usage"
+        ],
+        "title": "ManagedAccountResponse",
+        "type": "object"
+      },
+      "ManagedAccountUsage": {
+        "properties": {
+          "account": {
+            "$ref": "#/definitions/v2/ManagedAccount"
+          },
+          "availableResets": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "checkedAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modelSupported": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "ordinaryUsageAllowed": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "pools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "resets": {
+            "description": "Null means details are unknown, including failed reads.",
+            "items": {
+              "$ref": "#/definitions/v2/BankedReset"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/definitions/v2/AccountQuotaWindow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "account",
+          "checkedAt",
+          "pools",
+          "windows"
+        ],
+        "type": "object"
+      },
       "ManagedHooksRequirements": {
         "properties": {
           "Interrupt": {
@@ -14085,6 +14769,92 @@
           "SubagentStop",
           "UserPromptSubmit"
         ],
+        "type": "object"
+      },
+      "ManagedPoolAction": {
+        "enum": [
+          "create",
+          "list",
+          "read",
+          "update",
+          "select",
+          "remove"
+        ],
+        "type": "string"
+      },
+      "ManagedPoolParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "action": {
+            "$ref": "#/definitions/v2/ManagedPoolAction"
+          },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pool": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/AccountPool"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "ManagedPoolParams",
+        "type": "object"
+      },
+      "ManagedPoolResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/definitions/v2/AccountPool"
+            },
+            "type": "array"
+          },
+          "defaultSelection": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/AccountSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ManagedPoolResponse",
         "type": "object"
       },
       "MarketplaceAddParams": {
@@ -17165,6 +17935,15 @@
           "pluginNames"
         ],
         "type": "object"
+      },
+      "PoolWaitReason": {
+        "enum": [
+          "unknownAvailability",
+          "shortWindow",
+          "weeklyQuota",
+          "redemptionPending"
+        ],
+        "type": "string"
       },
       "ProcessExitedNotification": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -20485,6 +21264,23 @@
         ],
         "type": "object"
       },
+      "ThreadAccountPoolNotification": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "event": {
+            "$ref": "#/definitions/v2/AccountPoolEvent"
+          },
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "event",
+          "threadId"
+        ],
+        "title": "ThreadAccountPoolNotification",
+        "type": "object"
+      },
       "ThreadActiveFlag": {
         "enum": [
           "waitingOnApproval",
@@ -20638,6 +21434,16 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "description": "There are two ways to fork a thread: 1. By thread_id: load the thread from disk by thread_id and fork it into a new thread. 2. By path: load the thread from disk by path and fork it into a new thread.\n\nIf using a non-empty path, the thread_id param will be ignored. Empty string path values are treated as absent.\n\nPrefer using thread_id whenever possible.",
         "properties": {
+          "accountSelection": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/AccountSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "approvalPolicy": {
             "anyOf": [
               {
@@ -22897,6 +23703,16 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "description": "There are three ways to resume a thread: 1. By thread_id: load the thread from disk by thread_id and resume it. 2. By history: instantiate the thread from memory and resume it. 3. By path: load the thread from disk by path and resume it.\n\nFor non-running threads, the precedence is: history > non-empty path > thread_id. If using history or a non-empty path for a non-running thread, the thread_id param will be ignored.\n\nIf thread_id identifies a running thread, app-server rejoins that thread and treats a non-empty path as a consistency check against the active rollout path. Empty string path values are treated as absent.\n\nPrefer using thread_id whenever possible.",
         "properties": {
+          "accountSelection": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/AccountSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "approvalPolicy": {
             "anyOf": [
               {
@@ -23627,6 +24443,24 @@
       "ThreadStartParams": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
+          "accountSelection": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/AccountSelection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Session-local selection of a server-managed ChatGPT account or pool."
+          },
+          "accountSelectionSourceThreadId": {
+            "description": "Inherit the managed account and pool from an existing conversation. An explicit `accountSelection` takes precedence. This does not copy conversation history.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "approvalPolicy": {
             "anyOf": [
               {

@@ -188,7 +188,7 @@ fn has_usable_workspace_credits(credits: &CreditsSnapshot) -> bool {
 impl ChatWidget {
     /// Poll more often near exhaustion for every ChatGPT account, independently of experiments.
     pub(crate) fn rate_limit_refresh_interval(&self) -> Option<std::time::Duration> {
-        if !self.should_prefetch_rate_limits() {
+        if self.managed_accounts_active || !self.should_prefetch_rate_limits() {
             return None;
         }
         // Ignore unrelated model buckets; watch ordinary usage and the selected model's bucket.
@@ -220,7 +220,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn finish_rate_limit_recovery(&mut self) {
-        if self.waiting_for_luna_reserve() {
+        if !self.managed_accounts_active && self.waiting_for_luna_reserve() {
             return;
         }
         if std::mem::take(&mut self.input_queue.rate_limit_recovery_pending) {
@@ -363,6 +363,10 @@ impl ChatWidget {
             // /wham/usage identifies ordinary and additional model limits separately. Streamed
             // updates still drive warnings/recovery above, but must not overwrite status data.
             if matches!(source, RateLimitSnapshotSource::AccountUsage) {
+                if !self.managed_accounts_active && limit_id == "codex" {
+                    self.account_status
+                        .record_snapshot(&snapshot, Local::now().timestamp());
+                }
                 let limit_label = snapshot
                     .limit_name
                     .clone()
@@ -381,6 +385,9 @@ impl ChatWidget {
             }
         } else {
             self.rate_limit_snapshots_by_limit_id.clear();
+            if !self.managed_accounts_active {
+                self.account_status.weekly = None;
+            }
             self.codex_rate_limit_reached_type = None;
             self.codex_spend_control_reached = None;
         }

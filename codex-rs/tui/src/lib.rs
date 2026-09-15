@@ -57,7 +57,6 @@ use codex_features::Feature;
 use codex_login::AuthConfig;
 use codex_login::default_client::originator;
 use codex_login::default_client::set_default_client_residency_requirement;
-use codex_login::enforce_login_restrictions;
 use codex_login::is_workload_identity_selected;
 use codex_protocol::ThreadId;
 use codex_protocol::auth::AuthMode;
@@ -1190,12 +1189,251 @@ async fn run_ratatui_app(
     #[cfg(target_os = "windows")]
     let mut trust_decision_was_made = false;
     let startup_model_provider = initial_config.model_provider_id.clone();
+    let missing_session_exit =
+        |id_str: &str,
+         action: &str,
+         tui: &mut Tui,
+         terminal_restore_guard: &mut TerminalRestoreGuard| {
+            error!("Error finding conversation path: {id_str}");
+            terminal_restore_guard.restore_silently();
+            session_log::log_session_end();
+            let _ = tui.terminal.clear();
+            Ok(AppExitInfo {
+                token_usage: crate::token_usage::TokenUsage::default(),
+                thread_id: None,
+                resume_hint: None,
+                disconnect_info: None,
+                update_action: None,
+                exit_reason: ExitReason::Fatal(format!(
+                    "No saved session found with ID {id_str}. Run `codex {action}` without an ID to choose from existing sessions."
+                )),
+            })
+        };
+
+    let use_fork = cli.fork_picker || cli.fork_last || cli.fork_session_id.is_some();
+    let session_selection = if cli.agents_overview {
+        resume_picker::SessionSelection::AgentsOverview
+    } else if use_fork {
+        if let Some(id_str) = cli.fork_session_id.as_deref() {
+            let Some(startup_app_server) = app_server.as_mut() else {
+                unreachable!("app server should be initialized for --fork <id>");
+            };
+            let lookup = startup_draft
+                .run_until(
+                    &mut tui,
+                    lookup_session_target_with_app_server(
+                        startup_app_server,
+                        &initial_config,
+                        id_str,
+                    ),
+                )
+                .await;
+            let target_session = match lookup {
+                Ok(result) => result?,
+                Err(err) => {
+                    shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
+                    return Err(err.into());
+                }
+            };
+            match target_session {
+                Some(target_session) => resume_picker::SessionSelection::Fork(target_session),
+                None => {
+                    shutdown_app_server_if_present(app_server.take()).await;
+                    return missing_session_exit(
+                        id_str,
+                        "fork",
+                        &mut tui,
+                        &mut terminal_restore_guard,
+                    );
+                }
+            }
+        } else if cli.fork_last {
+            let filter_cwd = latest_session_cwd_filter(
+                uses_remote_workspace,
+                remote_cwd_override.as_deref(),
+                &initial_config,
+                cli.fork_show_all,
+            );
+            let Some(startup_app_server) = app_server.as_mut() else {
+                unreachable!("app server should be initialized for --fork --last");
+            };
+            let lookup = startup_draft
+                .run_until(
+                    &mut tui,
+                    lookup_latest_session_target_with_app_server(
+                        uses_remote_workspace_or_environment(
+                            &app_server_target,
+                            &environment_manager,
+                        ),
+                        startup_app_server,
+                        &initial_config,
+                        filter_cwd,
+                        /*include_non_interactive*/ false,
+                    ),
+                )
+                .await;
+            let target_session = match lookup {
+                Ok(result) => result?,
+                Err(err) => {
+                    shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
+                    return Err(err.into());
+                }
+            };
+            match target_session {
+                Some(target_session) => resume_picker::SessionSelection::Fork(target_session),
+                None => resume_picker::SessionSelection::StartFresh,
+            }
+        } else if cli.fork_picker {
+            if let Err(err) = startup_draft.flush_pending_events(&mut tui).await {
+                shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
+                return Err(err.into());
+            }
+            let Some(picker_server) = app_server.take() else {
+                unreachable!("app server should be initialized for --fork picker");
+            };
+            let (selection, returned_server) = resume_picker::run_fork_picker_with_app_server(
+                uses_remote_workspace_or_environment(&app_server_target, &environment_manager),
+                &mut tui,
+                &initial_config,
+                &crate::local_settings::LocalSettings::from(&initial_config),
+                cli.fork_show_all,
+                picker_server,
+            )
+            .await?;
+            app_server = Some(returned_server);
+            match selection {
+                resume_picker::SessionSelection::Exit => {
+                    shutdown_app_server_if_present(app_server.take()).await;
+                    terminal_restore_guard.restore_silently();
+                    session_log::log_session_end();
+                    return Ok(AppExitInfo {
+                        token_usage: crate::token_usage::TokenUsage::default(),
+                        thread_id: None,
+                        resume_hint: None,
+                        disconnect_info: None,
+                        update_action: None,
+                        exit_reason: ExitReason::UserRequested,
+                    });
+                }
+                other => other,
+            }
+        } else {
+            resume_picker::SessionSelection::StartFresh
+        }
+    } else if let Some(id_str) = cli.resume_session_id.as_deref() {
+        let Some(startup_app_server) = app_server.as_mut() else {
+            unreachable!("app server should be initialized for --resume <id>");
+        };
+        let lookup = startup_draft
+            .run_until(
+                &mut tui,
+                lookup_session_target_with_app_server(startup_app_server, &initial_config, id_str),
+            )
+            .await;
+        let target_session = match lookup {
+            Ok(result) => result?,
+            Err(err) => {
+                shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
+                return Err(err.into());
+            }
+        };
+        match target_session {
+            Some(target_session) => resume_picker::SessionSelection::Resume(target_session),
+            None => {
+                shutdown_app_server_if_present(app_server.take()).await;
+                return missing_session_exit(
+                    id_str,
+                    "resume",
+                    &mut tui,
+                    &mut terminal_restore_guard,
+                );
+            }
+        }
+    } else if cli.resume_last {
+        let filter_cwd = latest_session_cwd_filter(
+            uses_remote_workspace,
+            remote_cwd_override.as_deref(),
+            &initial_config,
+            cli.resume_show_all,
+        );
+        let Some(startup_app_server) = app_server.as_mut() else {
+            unreachable!("app server should be initialized for --resume --last");
+        };
+        let lookup = startup_draft
+            .run_until(
+                &mut tui,
+                lookup_latest_session_target_with_app_server(
+                    uses_remote_workspace_or_environment(&app_server_target, &environment_manager),
+                    startup_app_server,
+                    &initial_config,
+                    filter_cwd,
+                    cli.resume_include_non_interactive,
+                ),
+            )
+            .await;
+        let target_session = match lookup {
+            Ok(result) => result?,
+            Err(err) => {
+                shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
+                return Err(err.into());
+            }
+        };
+        match target_session {
+            Some(target_session) => resume_picker::SessionSelection::Resume(target_session),
+            None => resume_picker::SessionSelection::StartFresh,
+        }
+    } else if cli.resume_picker {
+        if let Err(err) = startup_draft.flush_pending_events(&mut tui).await {
+            shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
+            return Err(err.into());
+        }
+        let Some(picker_server) = app_server.take() else {
+            unreachable!("app server should be initialized for --resume picker");
+        };
+        let (selection, returned_server) = resume_picker::run_resume_picker_with_app_server(
+            uses_remote_workspace_or_environment(&app_server_target, &environment_manager),
+            &mut tui,
+            &initial_config,
+            &crate::local_settings::LocalSettings::from(&initial_config),
+            cli.resume_show_all,
+            cli.resume_include_non_interactive,
+            picker_server,
+        )
+        .await?;
+        app_server = Some(returned_server);
+        match selection {
+            resume_picker::SessionSelection::Exit => {
+                shutdown_app_server_if_present(app_server.take()).await;
+                terminal_restore_guard.restore_silently();
+                session_log::log_session_end();
+                return Ok(AppExitInfo {
+                    token_usage: crate::token_usage::TokenUsage::default(),
+                    thread_id: None,
+                    resume_hint: None,
+                    disconnect_info: None,
+                    update_action: None,
+                    exit_reason: ExitReason::UserRequested,
+                });
+            }
+            other => other,
+        }
+    } else {
+        resume_picker::SessionSelection::StartFresh
+    };
+
     let (login_status, mut startup_account) = if workload_identity_selected {
         (LoginStatus::AuthMode(AuthMode::Chatgpt), None)
     } else {
         let Some(active_app_server) = app_server.as_mut() else {
             unreachable!("app server should exist when auth is required");
         };
+        let account_thread = match &session_selection {
+            resume_picker::SessionSelection::Resume(target)
+            | resume_picker::SessionSelection::Fork(target) => Some(target.thread_id.to_string()),
+            _ => None,
+        };
+        active_app_server
+            .set_account_selection(initial_config.account_selection.clone(), account_thread);
         let login_status = startup_draft
             .run_until(&mut tui, get_login_status(active_app_server))
             .await;
@@ -1330,230 +1568,6 @@ async fn run_ratatui_app(
         shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
         return Err(err.into());
     }
-
-    let missing_session_exit =
-        |id_str: &str,
-         action: &str,
-         tui: &mut Tui,
-         terminal_restore_guard: &mut TerminalRestoreGuard| {
-            error!("Error finding conversation path: {id_str}");
-            terminal_restore_guard.restore_silently();
-            session_log::log_session_end();
-            let _ = tui.terminal.clear();
-            Ok(AppExitInfo {
-                token_usage: crate::token_usage::TokenUsage::default(),
-                thread_id: None,
-                resume_hint: None,
-                disconnect_info: None,
-                update_action: None,
-                exit_reason: ExitReason::Fatal(format!(
-                    "No saved session found with ID {id_str}. Run `codex {action}` without an ID to choose from existing sessions."
-                )),
-            })
-        };
-
-    let use_fork = cli.fork_picker || cli.fork_last || cli.fork_session_id.is_some();
-    let session_selection = if cli.agents_overview {
-        resume_picker::SessionSelection::AgentsOverview
-    } else if use_fork {
-        if let Some(id_str) = cli.fork_session_id.as_deref() {
-            let Some(startup_app_server) = app_server.as_mut() else {
-                unreachable!("app server should be initialized for --fork <id>");
-            };
-            let lookup = startup_draft
-                .run_until(
-                    &mut tui,
-                    lookup_session_target_with_app_server(startup_app_server, &config, id_str),
-                )
-                .await;
-            let target_session = match lookup {
-                Ok(result) => result?,
-                Err(err) => {
-                    shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
-                    return Err(err.into());
-                }
-            };
-            match target_session {
-                Some(target_session) => resume_picker::SessionSelection::Fork(target_session),
-                None => {
-                    shutdown_app_server_if_present(app_server.take()).await;
-                    return missing_session_exit(
-                        id_str,
-                        "fork",
-                        &mut tui,
-                        &mut terminal_restore_guard,
-                    );
-                }
-            }
-        } else if cli.fork_last {
-            let filter_cwd = latest_session_cwd_filter(
-                uses_remote_workspace,
-                remote_cwd_override.as_deref(),
-                &config,
-                cli.fork_show_all,
-            );
-            let Some(startup_app_server) = app_server.as_mut() else {
-                unreachable!("app server should be initialized for --fork --last");
-            };
-            let lookup = startup_draft
-                .run_until(
-                    &mut tui,
-                    lookup_latest_session_target_with_app_server(
-                        uses_remote_workspace_or_environment(
-                            &app_server_target,
-                            &environment_manager,
-                        ),
-                        startup_app_server,
-                        &config,
-                        filter_cwd,
-                        /*include_non_interactive*/ false,
-                    ),
-                )
-                .await;
-            let target_session = match lookup {
-                Ok(result) => result?,
-                Err(err) => {
-                    shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
-                    return Err(err.into());
-                }
-            };
-            match target_session {
-                Some(target_session) => resume_picker::SessionSelection::Fork(target_session),
-                None => resume_picker::SessionSelection::StartFresh,
-            }
-        } else if cli.fork_picker {
-            if let Err(err) = startup_draft.flush_pending_events(&mut tui).await {
-                shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
-                return Err(err.into());
-            }
-            let Some(app_server) = app_server.take() else {
-                unreachable!("app server should be initialized for --fork picker");
-            };
-            match resume_picker::run_fork_picker_with_app_server(
-                uses_remote_workspace_or_environment(&app_server_target, &environment_manager),
-                &mut tui,
-                &config,
-                &crate::local_settings::LocalSettings::from(&config),
-                cli.fork_show_all,
-                app_server,
-            )
-            .await?
-            {
-                resume_picker::SessionSelection::Exit => {
-                    terminal_restore_guard.restore_silently();
-                    session_log::log_session_end();
-                    return Ok(AppExitInfo {
-                        token_usage: crate::token_usage::TokenUsage::default(),
-                        thread_id: None,
-                        resume_hint: None,
-                        disconnect_info: None,
-                        update_action: None,
-                        exit_reason: ExitReason::UserRequested,
-                    });
-                }
-                other => other,
-            }
-        } else {
-            resume_picker::SessionSelection::StartFresh
-        }
-    } else if let Some(id_str) = cli.resume_session_id.as_deref() {
-        let Some(startup_app_server) = app_server.as_mut() else {
-            unreachable!("app server should be initialized for --resume <id>");
-        };
-        let lookup = startup_draft
-            .run_until(
-                &mut tui,
-                lookup_session_target_with_app_server(startup_app_server, &config, id_str),
-            )
-            .await;
-        let target_session = match lookup {
-            Ok(result) => result?,
-            Err(err) => {
-                shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
-                return Err(err.into());
-            }
-        };
-        match target_session {
-            Some(target_session) => resume_picker::SessionSelection::Resume(target_session),
-            None => {
-                shutdown_app_server_if_present(app_server.take()).await;
-                return missing_session_exit(
-                    id_str,
-                    "resume",
-                    &mut tui,
-                    &mut terminal_restore_guard,
-                );
-            }
-        }
-    } else if cli.resume_last {
-        let filter_cwd = latest_session_cwd_filter(
-            uses_remote_workspace,
-            remote_cwd_override.as_deref(),
-            &config,
-            cli.resume_show_all,
-        );
-        let Some(startup_app_server) = app_server.as_mut() else {
-            unreachable!("app server should be initialized for --resume --last");
-        };
-        let lookup = startup_draft
-            .run_until(
-                &mut tui,
-                lookup_latest_session_target_with_app_server(
-                    uses_remote_workspace_or_environment(&app_server_target, &environment_manager),
-                    startup_app_server,
-                    &config,
-                    filter_cwd,
-                    cli.resume_include_non_interactive,
-                ),
-            )
-            .await;
-        let target_session = match lookup {
-            Ok(result) => result?,
-            Err(err) => {
-                shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
-                return Err(err.into());
-            }
-        };
-        match target_session {
-            Some(target_session) => resume_picker::SessionSelection::Resume(target_session),
-            None => resume_picker::SessionSelection::StartFresh,
-        }
-    } else if cli.resume_picker {
-        if let Err(err) = startup_draft.flush_pending_events(&mut tui).await {
-            shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
-            return Err(err.into());
-        }
-        let Some(app_server) = app_server.take() else {
-            unreachable!("app server should be initialized for --resume picker");
-        };
-        match resume_picker::run_resume_picker_with_app_server(
-            uses_remote_workspace_or_environment(&app_server_target, &environment_manager),
-            &mut tui,
-            &config,
-            &crate::local_settings::LocalSettings::from(&config),
-            cli.resume_show_all,
-            cli.resume_include_non_interactive,
-            app_server,
-        )
-        .await?
-        {
-            resume_picker::SessionSelection::Exit => {
-                terminal_restore_guard.restore_silently();
-                session_log::log_session_end();
-                return Ok(AppExitInfo {
-                    token_usage: crate::token_usage::TokenUsage::default(),
-                    thread_id: None,
-                    resume_hint: None,
-                    disconnect_info: None,
-                    update_action: None,
-                    exit_reason: ExitReason::UserRequested,
-                });
-            }
-            other => other,
-        }
-    } else {
-        resume_picker::SessionSelection::StartFresh
-    };
 
     if let Err(err) = startup_draft.update_session_selection(&mut tui, &session_selection) {
         shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
@@ -1751,6 +1765,20 @@ async fn run_ratatui_app(
             }
         },
     };
+
+    let selected_account_thread = match &session_selection {
+        resume_picker::SessionSelection::Resume(target)
+        | resume_picker::SessionSelection::Fork(target) => Some(target.thread_id.to_string()),
+        _ => None,
+    };
+    app_server.set_account_selection(config.account_selection.clone(), selected_account_thread);
+    // A picker can select a different account from the one used during initial onboarding.
+    if matches!(
+        &session_selection,
+        resume_picker::SessionSelection::Resume(_) | resume_picker::SessionSelection::Fork(_)
+    ) {
+        startup_account = None;
+    }
 
     // Persistent app-server resumes may attach to an already-running thread,
     // where resume config overrides are ignored.

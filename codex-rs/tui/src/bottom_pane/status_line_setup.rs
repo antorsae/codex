@@ -17,6 +17,7 @@
 //! - Approval mode
 //! - Context usage (remaining %, used %, window size)
 //! - Usage limits (primary, secondary)
+//! - Weekly quota with reset countdown and active account email
 //! - Session info (thread title, thread ID, tokens used)
 //! - Application version
 
@@ -155,6 +156,18 @@ pub(crate) enum StatusLineItem {
 
     /// Latest checklist task progress from `update_plan` (if available).
     TaskProgress,
+
+    /// Weekly quota remaining with a compact countdown to its reset.
+    WeeklyLimitWithReset,
+
+    /// Email address of the active session's ChatGPT account.
+    AccountEmail,
+
+    /// Active account alias, weekly quota and reset countdown.
+    AccountWeekly,
+
+    /// Active pool's summed weekly quota and earliest weekly reset, excluding banked resets.
+    PoolWeekly,
 }
 
 impl StatusLineItem {
@@ -215,6 +228,18 @@ impl StatusLineItem {
             StatusLineItem::TaskProgress => {
                 "Latest task progress from update_plan (omitted until available)"
             }
+            StatusLineItem::WeeklyLimitWithReset => {
+                "Weekly quota remaining with reset countdown (omitted when unavailable)"
+            }
+            StatusLineItem::AccountEmail => {
+                "Active ChatGPT account email (omitted when unavailable)"
+            }
+            StatusLineItem::AccountWeekly => {
+                "Active account alias, weekly quota and reset countdown"
+            }
+            StatusLineItem::PoolWeekly => {
+                "Pool weekly quota sum and earliest reset (excludes banked resets)"
+            }
         }
     }
 
@@ -250,6 +275,10 @@ impl StatusLineItem {
             StatusLineItem::ThreadTitle => StatusSurfacePreviewItem::ThreadTitle,
             StatusLineItem::WorkspaceHeadline => StatusSurfacePreviewItem::WorkspaceHeadline,
             StatusLineItem::TaskProgress => StatusSurfacePreviewItem::TaskProgress,
+            StatusLineItem::WeeklyLimitWithReset => StatusSurfacePreviewItem::WeeklyLimitWithReset,
+            StatusLineItem::AccountEmail => StatusSurfacePreviewItem::AccountEmail,
+            StatusLineItem::AccountWeekly => StatusSurfacePreviewItem::AccountWeekly,
+            StatusLineItem::PoolWeekly => StatusSurfacePreviewItem::PoolWeekly,
         }
     }
 }

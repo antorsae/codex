@@ -896,6 +896,8 @@ impl App {
             &self.cli_kv_overrides,
             &self.harness_overrides,
         );
+        config.account_selection_source_thread_id =
+            self.chat_widget.thread_id().map(|id| id.to_string());
         let summary = session_summary(
             self.chat_widget.token_usage(),
             self.chat_widget.thread_id(),
@@ -921,6 +923,7 @@ impl App {
                         tracing::warn!("failed to unsubscribe tracked thread {thread_id}: {err}");
                     }
                 }
+                config.account_selection_source_thread_id = None;
                 self.local_settings = crate::local_settings::LocalSettings::from(&config);
                 self.config = config;
 

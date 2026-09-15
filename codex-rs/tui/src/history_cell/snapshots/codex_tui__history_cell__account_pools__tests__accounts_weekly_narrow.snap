@@ -1,0 +1,22 @@
+---
+source: tui/src/history_cell/account_pools_tests.rs
+expression: "render(&report, 48)"
+---
+Accounts (1)
+
+Default for new sessions: account acct1
+
+ Alias             acct1
+ Email             a@example.com
+ Plan              pro
+ Weekly left       66%
+ Reset in          3d 4h
+ Available resets  0
+
+Refresh with /accounts for current usage and
+banked resets.
+
+acct1 · Workspace ID: 00000000-0000-0000-0000-
+000000000001
+
+Pools: work · Checked: 2027-01-15 08:00 UTC

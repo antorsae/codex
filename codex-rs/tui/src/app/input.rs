@@ -233,6 +233,9 @@ impl App {
         app_server: &mut AppServerSession,
         key_event: KeyEvent,
     ) {
+        if self.chat_widget.cancel_capacity_retry_on_key(key_event) {
+            return;
+        }
         if self.chat_widget.is_external_writer_view()
             && self.overlay.is_none()
             && self.chat_widget.no_modal_or_popup_active()

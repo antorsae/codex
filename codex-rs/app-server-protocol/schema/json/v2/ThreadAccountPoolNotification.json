@@ -1,0 +1,156 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AccountPoolEvent": {
+      "oneOf": [
+        {
+          "properties": {
+            "account": {
+              "$ref": "#/definitions/ManagedAccount"
+            },
+            "type": {
+              "enum": [
+                "selected"
+              ],
+              "title": "SelectedAccountPoolEventType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "account",
+            "type"
+          ],
+          "title": "SelectedAccountPoolEvent",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "account": {
+              "type": "string"
+            },
+            "previousAccount": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "switched"
+              ],
+              "title": "SwitchedAccountPoolEventType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "account",
+            "previousAccount",
+            "type"
+          ],
+          "title": "SwitchedAccountPoolEvent",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "account": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "redeemed"
+              ],
+              "title": "RedeemedAccountPoolEventType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "account",
+            "type"
+          ],
+          "title": "RedeemedAccountPoolEvent",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "account": {
+              "type": "string"
+            },
+            "nextCheckAt": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "reason": {
+              "$ref": "#/definitions/PoolWaitReason"
+            },
+            "type": {
+              "enum": [
+                "waiting"
+              ],
+              "title": "WaitingAccountPoolEventType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "account",
+            "nextCheckAt",
+            "reason",
+            "type"
+          ],
+          "title": "WaitingAccountPoolEvent",
+          "type": "object"
+        }
+      ]
+    },
+    "ManagedAccount": {
+      "properties": {
+        "alias": {
+          "type": "string"
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "plan": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "userId": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "alias",
+        "userId",
+        "workspaceId"
+      ],
+      "type": "object"
+    },
+    "PoolWaitReason": {
+      "enum": [
+        "unknownAvailability",
+        "shortWindow",
+        "weeklyQuota",
+        "redemptionPending"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "event": {
+      "$ref": "#/definitions/AccountPoolEvent"
+    },
+    "threadId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "event",
+    "threadId"
+  ],
+  "title": "ThreadAccountPoolNotification",
+  "type": "object"
+}

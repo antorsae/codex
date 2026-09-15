@@ -322,6 +322,7 @@ use crate::status_indicator_widget::STATUS_DETAILS_DEFAULT_MAX_LINES;
 use crate::status_indicator_widget::StatusDetailsCapitalization;
 use crate::text_formatting::truncate_text;
 use crate::tui::FrameRequester;
+mod capacity_retry;
 mod command_lifecycle;
 mod connector_mentions;
 mod connectors;
@@ -424,6 +425,7 @@ mod windows_sandbox_prompts;
 use self::status_state::StatusIndicatorState;
 use self::status_state::StatusState;
 use self::status_state::TerminalTitleStatusKind;
+mod account_status;
 mod status_controls;
 mod status_surfaces;
 mod streaming;
@@ -569,6 +571,8 @@ pub(crate) struct ChatWidget {
     /// The currently active collaboration mask, if any.
     active_collaboration_mask: Option<CollaborationModeMask>,
     has_chatgpt_account: bool,
+    pub(crate) managed_accounts_active: bool,
+    account_status: account_status::AccountStatus,
     pub(crate) requires_openai_auth: bool,
     has_codex_backend_auth: bool,
     model_catalog: Arc<ModelCatalog>,
@@ -797,6 +801,7 @@ pub(crate) struct ChatWidget {
     external_editor_state: ExternalEditorState,
     last_rendered_user_message_display: Option<UserMessageDisplay>,
     last_non_retry_error: Option<(String, String)>,
+    capacity_retry: capacity_retry::CapacityRetryState,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -1175,6 +1180,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn pre_draw_tick(&mut self) {
+        self.retry_capacity_if_due();
         self.update_due_hook_visibility();
         self.schedule_hook_timer_if_needed();
         self.bottom_pane.pre_draw_tick();
@@ -1192,6 +1198,7 @@ impl ChatWidget {
         }
         self.refresh_status_line_if_workspace_headline_due();
         self.refresh_thread_usage_if_settlement_due();
+        self.refresh_account_status_if_due();
     }
 
     fn flush_active_cell(&mut self) {
@@ -1337,7 +1344,7 @@ impl ChatWidget {
     }
 
     fn on_user_message_display(&mut self, display: UserMessageDisplay) {
-        self.transcript.last_status_copy_targets = None;
+        self.transcript.last_command_copy_source = None;
         self.last_rendered_user_message_display = Some(display.clone());
         if !display.message.trim().is_empty()
             || !display.text_elements.is_empty()
@@ -1830,7 +1837,7 @@ impl ChatWidget {
                 | AppCommand::Review { .. }
                 | AppCommand::RunUserShellCommand { .. }
         ) {
-            self.transcript.last_status_copy_targets = None;
+            self.transcript.last_command_copy_source = None;
             self.input_queue.user_turn_pending_start = true;
         }
         if matches!(op, AppCommand::Interrupt) && self.turn_lifecycle.agent_turn_running {

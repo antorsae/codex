@@ -60,6 +60,13 @@ pub enum ThreadStartSource {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadStartParams {
+    /// Session-local selection of a server-managed ChatGPT account or pool.
+    #[ts(optional = nullable)]
+    pub account_selection: Option<codex_protocol::account_pool::AccountSelection>,
+    /// Inherit the managed account and pool from an existing conversation. An explicit
+    /// `accountSelection` takes precedence. This does not copy conversation history.
+    #[ts(optional = nullable)]
+    pub account_selection_source_thread_id: Option<String>,
     #[ts(optional = nullable)]
     pub model: Option<String>,
     #[ts(optional = nullable)]
@@ -333,6 +340,8 @@ pub struct ThreadSettingsUpdatedNotification {
 ///
 /// Prefer using thread_id whenever possible.
 pub struct ThreadResumeParams {
+    #[ts(optional = nullable)]
+    pub account_selection: Option<codex_protocol::account_pool::AccountSelection>,
     pub thread_id: String,
 
     /// [UNSTABLE] FOR CODEX CLOUD - DO NOT USE.
@@ -516,6 +525,8 @@ impl From<ThreadTurnsListResponse> for TurnsPage {
 ///
 /// Prefer using thread_id whenever possible.
 pub struct ThreadForkParams {
+    #[ts(optional = nullable)]
+    pub account_selection: Option<codex_protocol::account_pool::AccountSelection>,
     pub thread_id: String,
 
     /// Optional last turn id to fork through, inclusive.

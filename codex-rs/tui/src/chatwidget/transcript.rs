@@ -31,6 +31,11 @@ pub(super) struct StatusCopySource {
     pub(super) fields: Vec<(String, Arc<str>)>,
 }
 
+pub(super) enum CommandCopySource {
+    Status(StatusCopySource),
+    AccountPool(String),
+}
+
 #[derive(Default)]
 pub(super) struct TranscriptState {
     pub(super) active_cell: Option<Box<dyn HistoryCell>>,
@@ -42,8 +47,8 @@ pub(super) struct TranscriptState {
     pub(super) last_agent_markdown: Option<String>,
     /// Original source of that response, before display sanitization, for exact block copying.
     pub(super) last_agent_source: Option<String>,
-    /// Latest `/status` card and fields, retained across copying until a later turn or command.
-    pub(super) last_status_copy_targets: Option<StatusCopySource>,
+    /// Latest local report, retained across copying until a later turn or command.
+    pub(super) last_command_copy_source: Option<CommandCopySource>,
     pub(super) last_completed_agent_message: Option<(String, String)>,
     /// Raw markdown of the most recently completed proposed plan.
     pub(super) latest_proposed_plan_markdown: Option<String>,
@@ -91,14 +96,14 @@ impl TranscriptState {
     }
 
     pub(super) fn record_agent_markdown(&mut self, markdown: String, source: String) {
-        self.last_status_copy_targets = None;
+        self.last_command_copy_source = None;
         self.last_agent_markdown = Some(markdown);
         self.last_agent_source = Some(source);
         self.saw_copy_source_this_turn = true;
     }
 
     pub(super) fn reset_copy_history(&mut self) {
-        self.last_status_copy_targets = None;
+        self.last_command_copy_source = None;
         self.last_agent_markdown = None;
         self.last_agent_source = None;
         self.saw_copy_source_this_turn = false;

@@ -180,6 +180,9 @@ pub(super) fn server_notification_thread_target(
             Some(notification.thread_id.as_str())
         }
         ServerNotification::Warning(notification) => notification.thread_id.as_deref(),
+        ServerNotification::ThreadAccountPool(notification) => {
+            Some(notification.thread_id.as_str())
+        }
         ServerNotification::GuardianWarning(notification) => Some(notification.thread_id.as_str()),
         ServerNotification::McpServerStatusUpdated(notification) => {
             match notification.thread_id.as_deref() {

@@ -121,6 +121,8 @@ impl ChatWidget {
             current_collaboration_mode,
             active_collaboration_mask,
             has_chatgpt_account,
+            managed_accounts_active: false,
+            account_status: Default::default(),
             requires_openai_auth,
             has_codex_backend_auth,
             model_catalog,
@@ -269,6 +271,7 @@ impl ChatWidget {
             external_editor_state: ExternalEditorState::Closed,
             last_rendered_user_message_display: None,
             last_non_retry_error: None,
+            capacity_retry: capacity_retry::CapacityRetryState::default(),
         };
 
         widget.prefetch_rate_limits();

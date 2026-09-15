@@ -57,9 +57,10 @@ async fn replacement_uses_server_defaults_and_preserves_explicit_launch_settings
         server.bootstrap(&server_config).await?;
         app.config.codex_home = client_home.path().to_path_buf().abs();
         app.config.sqlite = SqliteConfig::new_for_testing(client_home.path().abs());
+        let source_thread = ThreadId::new();
         app.chat_widget
             .handle_thread_session_quiet(test_thread_session(
-                ThreadId::new(),
+                source_thread,
                 client_home.path().to_path_buf(),
             ));
         match explicit {
@@ -94,6 +95,10 @@ async fn replacement_uses_server_defaults_and_preserves_explicit_launch_settings
         .await;
         let starts = recorded_params(&requests, "thread/start");
         assert_eq!(starts.len(), 1);
+        assert_eq!(
+            starts[0]["accountSelectionSourceThreadId"],
+            serde_json::json!(source_thread.to_string())
+        );
         assert_eq!(
             (
                 &starts[0]["model"],

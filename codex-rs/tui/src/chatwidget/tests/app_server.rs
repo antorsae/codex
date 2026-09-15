@@ -74,12 +74,15 @@ async fn session_and_settings_sync_server_provider_id() {
         chat.add_status_output(
             /*refreshing_rate_limits*/ false, /*request_id*/ None,
         );
-        chat.transcript
-            .last_status_copy_targets
+        let super::super::transcript::CommandCopySource::Status(source) = chat
+            .transcript
+            .last_command_copy_source
             .as_ref()
             .expect("status")
-            .handle
-            .copy_text()
+        else {
+            panic!("expected status copy source")
+        };
+        source.handle.copy_text()
     };
     assert!(!status(&mut chat).contains("Model provider:"));
 

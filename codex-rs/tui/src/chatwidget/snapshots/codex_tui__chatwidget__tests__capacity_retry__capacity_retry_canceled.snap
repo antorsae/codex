@@ -1,0 +1,5 @@
+---
+source: tui/src/chatwidget/capacity_retry_tests.rs
+expression: rendered
+---
+• Automatic capacity retry canceled.

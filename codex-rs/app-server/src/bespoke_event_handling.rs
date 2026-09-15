@@ -290,6 +290,16 @@ pub(crate) async fn apply_bespoke_event_handling(
                 .send_server_notification(ServerNotification::Warning(notification))
                 .await;
         }
+        EventMsg::AccountPool(event) => {
+            outgoing
+                .send_server_notification(ServerNotification::ThreadAccountPool(
+                    codex_app_server_protocol::ThreadAccountPoolNotification {
+                        thread_id: conversation_id.to_string(),
+                        event,
+                    },
+                ))
+                .await;
+        }
         EventMsg::GuardianWarning(warning_event) => {
             let notification = GuardianWarningNotification {
                 thread_id: conversation_id.to_string(),

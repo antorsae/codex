@@ -1,0 +1,9 @@
+---
+source: tui/src/chatwidget/tests/account_pools_tests.rs
+expression: normalized_backend_snapshot(terminal.backend())
+---
+"                                                                                                                                            "
+"                                                                                                                                            "
+"› Ask Codex to do anything                                                                                                                  "
+"                                                                                                                                            "
+"  gpt-5.4 xhigh fast · /tmp/project · feature/account-footer · oa 14% 6d19h · nano 114% 4d7h                                                "

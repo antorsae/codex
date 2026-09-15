@@ -1,0 +1,123 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AccountSelection": {
+      "oneOf": [
+        {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "account"
+              ],
+              "title": "AccountAccountSelectionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "type"
+          ],
+          "title": "AccountAccountSelection",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "pool"
+              ],
+              "title": "PoolAccountSelectionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "type"
+          ],
+          "title": "PoolAccountSelection",
+          "type": "object"
+        }
+      ]
+    },
+    "ManagedAccountAction": {
+      "enum": [
+        "add",
+        "import",
+        "list",
+        "select",
+        "remove",
+        "usage",
+        "redeem",
+        "resolve",
+        "models"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "accountSelection": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AccountSelection"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Session selection for `resolve`; omitted selection uses saved state or the user default."
+    },
+    "action": {
+      "$ref": "#/definitions/ManagedAccountAction"
+    },
+    "alias": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "cursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "deviceAuth": {
+      "description": "Use device-code login for `add`; defaults to browser OAuth.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "limit": {
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "threadId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "action"
+  ],
+  "title": "ManagedAccountParams",
+  "type": "object"
+}

@@ -8,6 +8,13 @@ use std::path::PathBuf;
 
 #[derive(Args, Clone, Debug, Default)]
 pub struct SharedCliOptions {
+    /// Use a named local ChatGPT account for this session.
+    #[arg(long, value_name = "NAME", conflicts_with = "pool")]
+    pub account: Option<String>,
+
+    /// Use a named account pool, including its automatic quota recovery policy.
+    #[arg(long, value_name = "NAME", conflicts_with = "account")]
+    pub pool: Option<String>,
     /// Optional image(s) to attach to the initial prompt.
     #[arg(
         long = "image",
@@ -77,6 +84,17 @@ pub struct SharedCliOptions {
 }
 
 impl SharedCliOptions {
+    pub fn account_selection(&self) -> Option<codex_protocol::account_pool::AccountSelection> {
+        self.account
+            .clone()
+            .map(codex_protocol::account_pool::AccountSelection::Account)
+            .or_else(|| {
+                self.pool
+                    .clone()
+                    .map(codex_protocol::account_pool::AccountSelection::Pool)
+            })
+    }
+
     pub fn take_auto_review_config_overrides(&mut self, overrides: &mut CliConfigOverrides) {
         if self.auto_review {
             overrides
@@ -97,6 +115,8 @@ impl SharedCliOptions {
             || self.auto_review
             || self.dangerously_bypass_approvals_and_sandbox;
         let Self {
+            account,
+            pool,
             images,
             model,
             oss,
@@ -111,6 +131,8 @@ impl SharedCliOptions {
             add_dir,
         } = self;
         let Self {
+            account: root_account,
+            pool: root_pool,
             images: root_images,
             model: root_model,
             oss: root_oss,
@@ -125,6 +147,10 @@ impl SharedCliOptions {
             add_dir: root_add_dir,
         } = root;
 
+        if account.is_none() && pool.is_none() {
+            account.clone_from(root_account);
+            pool.clone_from(root_pool);
+        }
         if model.is_none() {
             model.clone_from(root_model);
         }
@@ -167,6 +193,8 @@ impl SharedCliOptions {
             || subcommand.auto_review
             || subcommand.dangerously_bypass_approvals_and_sandbox;
         let Self {
+            account,
+            pool,
             images,
             model,
             oss,
@@ -181,6 +209,10 @@ impl SharedCliOptions {
             add_dir,
         } = subcommand;
 
+        if account.is_some() || pool.is_some() {
+            self.account = account;
+            self.pool = pool;
+        }
         if let Some(model) = model {
             self.model = Some(model);
         }

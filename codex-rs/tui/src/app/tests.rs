@@ -1,5 +1,10 @@
 //! App-level orchestration tests for the TUI.
 
+#[path = "tests/account_pool_recovery_tests.rs"]
+mod account_pool_recovery_tests;
+#[path = "tests/account_pools_tests.rs"]
+mod account_pools_tests;
+
 #[path = "tests/daybreak_tests.rs"]
 mod daybreak_tests;
 
@@ -19,6 +24,8 @@ mod background_exit_tests;
 mod background_task_defaults_tests;
 #[path = "tests/buffered_replay.rs"]
 mod buffered_replay;
+#[path = "tests/capacity_retry_tests.rs"]
+mod capacity_retry_tests;
 #[path = "tests/connector_policy.rs"]
 mod connector_policy;
 #[path = "tests/disconnect_tests.rs"]
