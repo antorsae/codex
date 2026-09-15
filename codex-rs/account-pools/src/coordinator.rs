@@ -15,6 +15,7 @@ use codex_login::CodexAuth;
 use codex_login::ExternalAuth;
 use codex_login::ExternalAuthFuture;
 use codex_login::ExternalAuthRefreshContext;
+use codex_protocol::account_pool::AccountPoolConfig;
 use codex_protocol::account_pool::AccountPoolEvent;
 use codex_protocol::account_pool::AccountSelection;
 use codex_protocol::account_pool::ManagedAccount;
@@ -22,11 +23,11 @@ use codex_protocol::account_pool::PoolWaitReason;
 use futures::StreamExt;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
-use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -40,17 +41,13 @@ struct RecoveryState {
 }
 
 struct SessionAuth {
-    current: RwLock<Arc<AuthManager>>,
+    current: Arc<AuthManager>,
 }
 
 impl ExternalAuth for SessionAuth {
     fn resolve(&self) -> ExternalAuthFuture<'_, CodexAuth> {
         Box::pin(async move {
-            let manager = self
-                .current
-                .read()
-                .map_err(|_| std::io::Error::other("Account selection lock failed"))?
-                .clone();
+            let manager = &self.current;
             manager.reload().await;
             manager
                 .auth()
@@ -60,11 +57,7 @@ impl ExternalAuth for SessionAuth {
     }
     fn refresh(&self, context: ExternalAuthRefreshContext) -> ExternalAuthFuture<'_, CodexAuth> {
         Box::pin(async move {
-            let manager = self
-                .current
-                .read()
-                .map_err(|_| std::io::Error::other("Account selection lock failed"))?
-                .clone();
+            let manager = &self.current;
             if manager.auth_cached().and_then(|auth| auth.get_account_id())
                 != context.previous_account_id
             {
@@ -79,18 +72,53 @@ impl ExternalAuth for SessionAuth {
     }
 }
 
+#[derive(Clone, PartialEq, Eq)]
+struct PoolMembership {
+    accounts: Vec<ManagedAccount>,
+    redeem_weekly: bool,
+}
+
+impl PoolMembership {
+    fn from_config(config: &AccountPoolConfig, selection: &AccountSelection) -> Result<Self> {
+        // Accounts and pools come from the same validated, atomically replaced file.
+        let (aliases, redeem_weekly) = match selection {
+            AccountSelection::Account(alias) => (vec![alias.clone()], false),
+            AccountSelection::Pool(name) => {
+                let pool = config
+                    .pools
+                    .iter()
+                    .find(|pool| &pool.name == name)
+                    .context("Unknown pool")?;
+                (pool.accounts.clone(), pool.redeem_weekly_resets)
+            }
+        };
+        let accounts = aliases
+            .iter()
+            .map(|alias| {
+                config
+                    .accounts
+                    .iter()
+                    .find(|account| &account.alias == alias)
+                    .cloned()
+                    .context("Unknown account")
+            })
+            .collect::<Result<_>>()?;
+        Ok(Self {
+            accounts,
+            redeem_weekly,
+        })
+    }
+}
+
 /// A session owns its selection; only credential refresh and reset transactions are shared.
 pub struct PoolSession {
     store: AccountStore,
     selection: AccountSelection,
-    accounts: Vec<ManagedAccount>,
-    redeem_weekly: bool,
+    membership: RwLock<PoolMembership>,
     waiting: AtomicBool,
-    current: Mutex<usize>,
-    // Metadata reads must remain available while recovery holds `current` to wait for quota.
-    selected_index: AtomicUsize,
-    denied_until: Mutex<Vec<i64>>,
-    selected_auth: Arc<SessionAuth>,
+    // Metadata reads remain available while recovery holds `denied_until` to wait for quota.
+    current: RwLock<ManagedAccount>,
+    denied_until: Mutex<HashMap<(String, String), i64>>,
     auth: Arc<AuthManager>,
     recovery_path: RwLock<Option<PathBuf>>,
 }
@@ -127,32 +155,12 @@ impl PoolSession {
         let config = store.read()?;
         let Some(selection) = explicit
             .or_else(|| saved.as_ref().map(|state| state.selection.clone()))
-            .or(config.default_selection)
+            .or_else(|| config.default_selection.clone())
         else {
             return Ok(None);
         };
-        let (aliases, redeem_weekly) = match &selection {
-            AccountSelection::Account(alias) => (vec![alias.clone()], false),
-            AccountSelection::Pool(name) => {
-                let pool = config
-                    .pools
-                    .iter()
-                    .find(|pool| &pool.name == name)
-                    .context("Unknown pool")?;
-                (pool.accounts.clone(), pool.redeem_weekly_resets)
-            }
-        };
-        let accounts: Vec<_> = aliases
-            .iter()
-            .map(|alias| {
-                config
-                    .accounts
-                    .iter()
-                    .find(|account| &account.alias == alias)
-                    .cloned()
-                    .context("Unknown account")
-            })
-            .collect::<Result<_>>()?;
+        let membership = PoolMembership::from_config(&config, &selection)?;
+        let accounts = &membership.accounts;
         let current = saved
             .as_ref()
             .filter(|saved| saved.selection == selection)
@@ -163,12 +171,10 @@ impl PoolSession {
             })
             .unwrap_or(0);
         let manager = store.manager(&accounts[current]).await?;
-        let selected_auth = Arc::new(SessionAuth {
-            current: RwLock::new(manager),
-        });
+        let selected_auth = Arc::new(SessionAuth { current: manager });
         let auth = AuthManager::managed_from_auth_config(store.auth_config.clone()).await;
-        auth.set_external_auth(selected_auth.clone()).await?;
-        let denied_until = Mutex::new(vec![0; accounts.len()]);
+        auth.set_external_auth(selected_auth).await?;
+        let current = accounts[current].clone();
         let waiting = AtomicBool::new(
             saved
                 .as_ref()
@@ -177,13 +183,10 @@ impl PoolSession {
         Ok(Some(Arc::new(Self {
             store,
             selection,
-            accounts,
-            redeem_weekly,
-            denied_until,
+            membership: RwLock::new(membership),
+            denied_until: Mutex::new(HashMap::new()),
             waiting,
-            current: Mutex::new(current),
-            selected_index: AtomicUsize::new(current),
-            selected_auth,
+            current: RwLock::new(current),
             auth,
             recovery_path: RwLock::new(None),
         })))
@@ -194,7 +197,11 @@ impl PoolSession {
     }
 
     pub async fn selected_account(&self) -> ManagedAccount {
-        let mut account = self.accounts[self.selected_index.load(Ordering::Acquire)].clone();
+        let mut account = self
+            .current
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         if let Some(auth) = self.auth.auth_cached().filter(|auth| {
             auth.get_chatgpt_user_id().as_deref() == Some(&account.user_id)
                 && auth.get_account_id().as_deref() == Some(&account.workspace_id)
@@ -216,17 +223,21 @@ impl PoolSession {
         &self.selection
     }
 
-    /// The pool membership and policy captured when this session was opened.
+    /// The last valid pool membership and policy observed by this session.
     pub fn pool(&self) -> Option<codex_protocol::account_pool::AccountPool> {
+        let membership = self
+            .membership
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         match &self.selection {
             AccountSelection::Pool(name) => Some(codex_protocol::account_pool::AccountPool {
                 name: name.clone(),
-                accounts: self
+                accounts: membership
                     .accounts
                     .iter()
                     .map(|account| account.alias.clone())
                     .collect(),
-                redeem_weekly_resets: self.redeem_weekly,
+                redeem_weekly_resets: membership.redeem_weekly,
             }),
             AccountSelection::Account(_) => None,
         }
@@ -243,10 +254,10 @@ impl PoolSession {
                 .join("sessions")
                 .join(format!("{thread_id}.json")),
         );
-        self.persist(*self.current.lock().await, self.is_waiting())
+        self.persist(&self.selected_account().await, self.is_waiting())
     }
 
-    fn persist(&self, current: usize, waiting: bool) -> Result<()> {
+    fn persist(&self, current: &ManagedAccount, waiting: bool) -> Result<()> {
         if let Some(path) = self
             .recovery_path
             .read()
@@ -257,7 +268,7 @@ impl PoolSession {
                 path,
                 &RecoveryState {
                     selection: self.selection.clone(),
-                    account: self.accounts[current].alias.clone(),
+                    account: current.alias.clone(),
                     waiting,
                 },
             )?;
@@ -282,7 +293,7 @@ impl PoolSession {
 
     #[expect(
         clippy::await_holding_invalid_type,
-        reason = "A session must serialize recovery and keep its selected identity and rejection evidence stable until recovery completes or is cancelled; these locks are never shared between sessions"
+        reason = "A session must serialize recovery and keep its rejection evidence stable until recovery completes or is cancelled; this lock is never shared between sessions"
     )]
     pub(crate) async fn recover_with(
         &self,
@@ -298,36 +309,70 @@ impl PoolSession {
                 let started = tokio::time::Instant::now();
                 let wall_start = chrono::Utc::now().timestamp_millis();
                 let now = || ((wall_start + started.elapsed().as_millis() as i64) / 1000).max(chrono::Utc::now().timestamp());
-                let mut current = self.current.lock().await;
-                self.waiting.store(/*val*/ true, Ordering::Release);
                 // A model rejection is newer evidence than an eventually consistent usage read.
                 let mut denied_until = self.denied_until.lock().await;
-                denied_until[*current] = now() + 60;
-                self.persist(*current, /*waiting*/ true)?;
+                let current = self.selected_account().await;
+                self.waiting.store(/*val*/ true, Ordering::Release);
+                denied_until.insert((current.user_id.clone(), current.workspace_id.clone()), now() + 60);
+                self.persist(&current, /*waiting*/ true)?;
                 let mut failures = 0u32;
                 let mut redemption_guard = None;
+                let read_membership = || PoolMembership::from_config(&self.store.read()?, &self.selection);
                 loop {
+                    let membership = match read_membership() {
+                        Ok(membership) => membership,
+                        Err(_) => {
+                            // External editors can bypass atomic replacement. A missing, partial,
+                            // or invalid definition must pause recovery, never end the turn or
+                            // authorize switching/resetting from stale configuration.
+                            drop(redemption_guard.take());
+                            notify(AccountPoolEvent::Waiting {
+                                account: current.alias.clone(),
+                                reason: PoolWaitReason::UnknownAvailability,
+                                next_check_at: now() + 60,
+                            });
+                            tokio::time::sleep(Duration::from_secs(/*secs*/ 60)).await;
+                            continue;
+                        }
+                    };
+                    *self.membership.write().unwrap_or_else(std::sync::PoisonError::into_inner) = membership.clone();
+                    let accounts = &membership.accounts;
+                    // Account identities, rather than changing pool indexes, own rejection evidence.
+                    denied_until.retain(|(user, workspace), _| accounts.iter().any(|account| {
+                        &account.user_id == user && &account.workspace_id == workspace
+                    }));
+                    let current_index = accounts.iter().position(|account| {
+                        account.user_id == current.user_id && account.workspace_id == current.workspace_id
+                    }).unwrap_or(accounts.len());
                     // At most 128 pool members and 32 concurrent reads keep all observations
                     // within the 90-second freshness bound (each read has a 20-second timeout).
-                    let mut reads = Vec::with_capacity(self.accounts.len());
-                    for account in &self.accounts { reads.push(backend.usage(account, Some(model))); }
+                    let mut reads = Vec::with_capacity(accounts.len());
+                    for account in accounts { reads.push(backend.usage(account, Some(model))); }
                     let mut usages: Vec<_> = futures::stream::iter(reads).buffered(32).collect().await;
+                    // A pool update during network reads invalidates the whole decision, including
+                    // removals and weekly-reset policy changes. No config lock spans network I/O.
+                    if read_membership().ok().as_ref() != Some(&membership) {
+                        drop(redemption_guard.take());
+                        continue;
+                    }
                     let now = now();
                     for (index, usage) in usages.iter_mut().enumerate() {
-                        if denied_until[index] > now && usage.ordinary_usage_allowed == Some(true) {
+                        let account = &accounts[index];
+                        if denied_until.get(&(account.user_id.clone(), account.workspace_id.clone())).is_some_and(|until| *until > now)
+                            && usage.ordinary_usage_allowed == Some(true) {
                             usage.ordinary_usage_allowed = Some(false);
                         }
                     }
-                    let trigger = if crate::policy::blocked(&usages[*current], WindowKind::Weekly) {
+                    let trigger = if usages.get(current_index).is_some_and(|usage| crate::policy::blocked(usage, WindowKind::Weekly)) {
                         WindowKind::Weekly
                     } else { WindowKind::Short };
-                    let mut decision = decide(&usages, *current, trigger, self.redeem_weekly, now);
+                    let mut decision = decide(&usages, current_index, trigger, membership.redeem_weekly, now);
                     if !matches!(decision, Decision::Use(_)) {
-                        for (index, account) in self.accounts.iter().enumerate() {
+                        for (index, account) in accounts.iter().enumerate() {
                             if let Some(credit) = crate::redemption::pending_credit(&self.store, account)? {
                                 // An old intent is not new permission to spend a credit.
                                 // Reconcile only while the automatic weekly policy still applies.
-                                if self.redeem_weekly && usages[index].model_supported == Some(true)
+                                if membership.redeem_weekly && usages[index].model_supported == Some(true)
                                     && matches!(decision, Decision::Redeem(..) | Decision::Wait(PoolWaitReason::WeeklyQuota, _))
                                 {
                                     decision = Decision::Redeem(index, credit);
@@ -345,31 +390,35 @@ impl PoolSession {
                     }
                     let (reason, mut next) = match decision {
                         Decision::Use(index) => {
-                            let fresh = backend.usage(&self.accounts[index], Some(model)).await;
-                            if usable(&fresh, chrono::Utc::now().timestamp()) {
-                                let previous = self.accounts[*current].alias.clone();
-                                self.activate(index, &mut current).await?;
-                                crate::redemption::observe_usable(&self.store, &self.accounts[index]).await?;
-                                if previous != self.accounts[index].alias {
-                                    notify(AccountPoolEvent::Switched { account: self.accounts[index].alias.clone(), previous_account: previous });
+                            let fresh = backend.usage(&accounts[index], Some(model)).await;
+                            if usable(&fresh, chrono::Utc::now().timestamp())
+                                && read_membership().ok().as_ref() == Some(&membership)
+                                && self.activate(&accounts[index]).await.is_ok()
+                            {
+                                crate::redemption::observe_usable(&self.store, &accounts[index]).await?;
+                                if current.alias != accounts[index].alias {
+                                    notify(AccountPoolEvent::Switched { account: accounts[index].alias.clone(), previous_account: current.alias.clone() });
                                 }
-                                self.persist(index, /*waiting*/ false)?;
+                                self.persist(&accounts[index], /*waiting*/ false)?;
                                 self.waiting.store(/*val*/ false, Ordering::Release);
                                 return Ok(());
                             }
                             (PoolWaitReason::UnknownAvailability, now + 60)
                         }
                         Decision::Redeem(index, credit) => {
-                            match crate::redemption::redeem(&self.store, backend, &self.accounts[index], Some(model), &credit, crate::redemption::RedemptionMode::Automatic).await {
+                            match crate::redemption::redeem(&self.store, backend, &accounts[index], Some(model), &credit, crate::redemption::RedemptionMode::Automatic).await {
                                 Ok(fresh) if usable(&fresh, chrono::Utc::now().timestamp()) => {
-                                    denied_until[index] = 0;
-                                    notify(AccountPoolEvent::Redeemed { account: self.accounts[index].alias.clone() });
-                                    let previous = self.accounts[*current].alias.clone();
-                                    self.activate(index, &mut current).await?;
-                                    if previous != self.accounts[index].alias {
-                                        notify(AccountPoolEvent::Switched { account: self.accounts[index].alias.clone(), previous_account: previous });
+                                    denied_until.remove(&(accounts[index].user_id.clone(), accounts[index].workspace_id.clone()));
+                                    notify(AccountPoolEvent::Redeemed { account: accounts[index].alias.clone() });
+                                    if read_membership().ok().as_ref() != Some(&membership)
+                                        || self.activate(&accounts[index]).await.is_err() {
+                                        drop(redemption_guard.take());
+                                        continue;
                                     }
-                                    self.persist(index, /*waiting*/ false)?;
+                                    if current.alias != accounts[index].alias {
+                                        notify(AccountPoolEvent::Switched { account: accounts[index].alias.clone(), previous_account: current.alias.clone() });
+                                    }
+                                    self.persist(&accounts[index], /*waiting*/ false)?;
                                     self.waiting.store(/*val*/ false, Ordering::Release);
                                     return Ok(());
                                 }
@@ -389,25 +438,26 @@ impl PoolSession {
                                 .min().unwrap_or(backoff).min(backoff);
                         }
                     } else { failures = 0; }
-                    notify(AccountPoolEvent::Waiting { account: self.accounts[*current].alias.clone(), reason, next_check_at: next });
+                    notify(AccountPoolEvent::Waiting { account: current.alias.clone(), reason, next_check_at: next });
                     tokio::time::sleep(Duration::from_secs((next - now).max(1) as u64)).await;
                 }
             } => result,
         }
     }
 
-    async fn activate(&self, index: usize, current: &mut usize) -> Result<()> {
-        if index != *current {
-            let manager = self.store.manager(&self.accounts[index]).await?;
-            *self
-                .selected_auth
-                .current
-                .write()
-                .map_err(|_| anyhow::anyhow!("Account selection lock failed"))? = manager;
-            self.auth.reload().await;
-            *current = index;
-            self.selected_index.store(index, Ordering::Release);
+    async fn activate(&self, account: &ManagedAccount) -> Result<()> {
+        let current = self.selected_account().await;
+        if account.user_id != current.user_id || account.workspace_id != current.workspace_id {
+            let manager = self.store.manager(account).await?;
+            // Resolve successfully before replacing the session's provider and cached credentials.
+            self.auth
+                .set_external_auth(Arc::new(SessionAuth { current: manager }))
+                .await?;
         }
+        *self
+            .current
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = account.clone();
         Ok(())
     }
 }

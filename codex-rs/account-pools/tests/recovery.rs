@@ -1,3 +1,4 @@
+use anyhow::Context;
 use anyhow::Result;
 use base64::Engine;
 use codex_account_pools::AccountStore;
@@ -18,8 +19,12 @@ use wiremock::matchers::header;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 
-#[tokio::test]
-async fn weekly_only_pool_switches_to_available_account_without_spending_a_reset() -> Result<()> {
+enum PoolUpdate {
+    Unchanged,
+    AddAvailableMember,
+}
+
+async fn verify_weekly_recovery(update: PoolUpdate) -> Result<()> {
     // The backend may return one quota window in either primary or secondary position.
     for position in ["primary_window", "secondary_window"] {
         let server = MockServer::start().await;
@@ -106,19 +111,36 @@ async fn weekly_only_pool_switches_to_available_account_without_spending_a_reset
             .put_pool(
                 AccountPool {
                     name: "nano".to_owned(),
-                    accounts: ["oa", "ob", "oc"].map(str::to_owned).to_vec(),
+                    accounts: match update {
+                        PoolUpdate::Unchanged => {
+                            vec!["oa".to_owned(), "ob".to_owned(), "oc".to_owned()]
+                        }
+                        PoolUpdate::AddAvailableMember => vec!["oa".to_owned(), "ob".to_owned()],
+                    },
                     redeem_weekly_resets: true,
                 },
                 /*create*/ true,
             )
             .await?;
         let pool = PoolSession::open(
-            store,
+            store.clone(),
             Some(AccountSelection::Pool("nano".to_owned())),
             /*resume_id*/ None,
         )
         .await?
-        .expect("configured pool");
+        .context("configured pool")?;
+        if matches!(update, PoolUpdate::AddAvailableMember) {
+            store
+                .put_pool(
+                    AccountPool {
+                        name: "nano".to_owned(),
+                        accounts: ["oa", "ob", "oc"].map(str::to_owned).to_vec(),
+                        redeem_weekly_resets: true,
+                    },
+                    /*create*/ false,
+                )
+                .await?;
+        }
         let cancel = CancellationToken::new();
         let mut events = Vec::new();
         let recovery = tokio::time::timeout(
@@ -143,7 +165,11 @@ async fn weekly_only_pool_switches_to_available_account_without_spending_a_reset
         assert_eq!(
             (
                 pool.selected_account().await.alias,
-                pool.auth_manager().auth().await.unwrap().get_account_id(),
+                pool.auth_manager()
+                    .auth()
+                    .await
+                    .context("selected account has auth")?
+                    .get_account_id(),
                 pool.is_waiting(),
             ),
             ("oc".to_owned(), Some("workspace-oc".to_owned()), false)
@@ -152,10 +178,20 @@ async fn weekly_only_pool_switches_to_available_account_without_spending_a_reset
             server
                 .received_requests()
                 .await
-                .unwrap()
+                .context("request recording enabled")?
                 .iter()
                 .all(|request| request.method == "GET")
         );
     }
     Ok(())
+}
+
+#[tokio::test]
+async fn weekly_only_pool_switches_to_available_account_without_spending_a_reset() -> Result<()> {
+    verify_weekly_recovery(PoolUpdate::Unchanged).await
+}
+
+#[tokio::test]
+async fn recovery_reloads_members_added_after_the_session_opened() -> Result<()> {
+    verify_weekly_recovery(PoolUpdate::AddAvailableMember).await
 }

@@ -32,6 +32,9 @@ use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 
+#[path = "pool_reload_tests.rs"]
+mod pool_reload;
+
 pub(super) fn account(alias: &str) -> ManagedAccount {
     ManagedAccount {
         alias: alias.to_owned(),
