@@ -3,6 +3,7 @@
 //! This module owns the typed JSON-RPC calls needed by the TUI and keeps
 //! request/response plumbing out of `App` and `ChatWidget`.
 
+pub(crate) mod account_status;
 mod fs;
 mod history;
 mod models;
@@ -309,6 +310,11 @@ pub(crate) struct AppServerBootstrap {
 
 pub(crate) struct AppServerSession {
     client: AppServerClient,
+    pub(crate) account_status_cache: Arc<tokio::sync::Mutex<account_status::AccountStatusCache>>,
+    pub(crate) account_status_changed: Arc<AtomicBool>,
+    pub(crate) account_status_invalidations:
+        Arc<std::sync::Mutex<account_status::AccountStatusInvalidations>>,
+    pub(crate) account_status_task: std::sync::Mutex<account_status::AccountStatusTask>,
     account_selection: Option<codex_protocol::account_pool::AccountSelection>,
     account_thread_id: Option<String>,
     pub(crate) managed_accounts_active: bool,
@@ -415,6 +421,10 @@ impl AppServerSession {
     pub(crate) fn new(client: AppServerClient, thread_params_mode: ThreadParamsMode) -> Self {
         Self {
             client,
+            account_status_cache: Arc::default(),
+            account_status_changed: Arc::default(),
+            account_status_invalidations: Arc::default(),
+            account_status_task: Default::default(),
             next_request_id: 1,
             account_selection: None,
             account_thread_id: None,
@@ -1737,6 +1747,7 @@ impl AppServerSession {
     }
 
     pub(crate) async fn shutdown(self) -> std::io::Result<()> {
+        drop(self.account_status_task);
         self.client.shutdown().await
     }
 

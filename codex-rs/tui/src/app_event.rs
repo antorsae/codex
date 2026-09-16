@@ -272,12 +272,12 @@ pub(crate) enum AppEvent {
     },
     RefreshAccountStatus {
         request_id: Uuid,
-        account: codex_protocol::account_pool::ManagedAccount,
-        pool: Option<codex_protocol::account_pool::AccountPool>,
+        thread_id: ThreadId,
+        include_pool_usage: bool,
     },
     AccountStatusLoaded {
         request_id: Uuid,
-        result: Result<Vec<codex_protocol::account_pool::ManagedAccountUsage>, String>,
+        result: Result<crate::chatwidget::AccountStatusSnapshot, String>,
     },
     ReviewMisalignment(Arc<crate::chatwidget::MisalignmentReview>),
     ContinueMisalignment(Arc<crate::chatwidget::MisalignmentReview>),

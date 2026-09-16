@@ -20,64 +20,48 @@ impl App {
         &mut self,
         server: &AppServerSession,
         request_id: uuid::Uuid,
-        account: codex_protocol::account_pool::ManagedAccount,
-        pool: Option<AccountPool>,
+        thread_id: codex_protocol::ThreadId,
+        include_pool_usage: bool,
     ) {
+        let mut refresh_task = server
+            .account_status_task
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *refresh_task = Default::default();
+        if self
+            .thread_event_channels
+            .get(&thread_id)
+            .is_some_and(|channel| channel.attachment() != super::ThreadEventAttachment::Live)
+        {
+            // Resolving an unloaded thread can fall back to the default for new sessions.
+            self.app_event_tx.send(AppEvent::AccountStatusLoaded {
+                request_id,
+                result: Err("Account status requires a live thread".to_owned()),
+            });
+            return;
+        }
         let handle = server.request_handle();
+        let cache = std::sync::Arc::clone(&server.account_status_cache);
+        let changed = std::sync::Arc::clone(&server.account_status_changed);
+        let invalidations = std::sync::Arc::clone(&server.account_status_invalidations);
         let tx = self.app_event_tx.clone();
-        tokio::spawn(async move {
-            let mut aliases = pool.map(|pool| pool.accounts).unwrap_or_default();
-            if !aliases.contains(&account.alias) {
-                aliases.push(account.alias);
-            }
-            let result = async {
-                let mut usages = Vec::with_capacity(aliases.len());
-                for batch in aliases.chunks(/*chunk_size*/ 32) {
-                    let mut reads = tokio::task::JoinSet::new();
-                    for alias in batch {
-                        let handle = handle.clone();
-                        let alias = alias.clone();
-                        reads.spawn(async move {
-                            tokio::time::timeout(
-                                std::time::Duration::from_secs(/*secs*/ 30),
-                                async {
-                                    let response: ManagedAccountResponse = handle
-                                        .request_typed(ClientRequest::ManagedAccount {
-                                            request_id: RequestId::String(
-                                                uuid::Uuid::new_v4().to_string(),
-                                            ),
-                                            params: ManagedAccountParams {
-                                                action: ManagedAccountAction::Usage,
-                                                alias: Some(alias),
-                                                account_selection: None,
-                                                thread_id: None,
-                                                device_auth: None,
-                                                model: None,
-                                                cursor: None,
-                                                limit: None,
-                                            },
-                                        })
-                                        .await
-                                        .map_err(|error| error.to_string())?;
-                                    response.usage.into_iter().next().ok_or_else(|| {
-                                        "No usage returned for the selected account".to_owned()
-                                    })
-                                },
-                            )
-                            .await
-                            .map_err(|_| "Account status request timed out".to_owned())
-                            .and_then(std::convert::identity)
-                        });
-                    }
-                    while let Some(result) = reads.join_next().await {
-                        usages.push(result.map_err(|error| error.to_string())??);
-                    }
-                }
-                Ok(usages)
-            }
-            .await;
+        let task = tokio::spawn(async move {
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(/*secs*/ 120),
+                crate::app_server_session::account_status::load(
+                    &handle,
+                    &cache,
+                    &changed,
+                    &invalidations,
+                    thread_id,
+                    include_pool_usage,
+                ),
+            )
+            .await
+            .unwrap_or_else(|_| Err("Account status refresh timed out".to_owned()));
             tx.send(AppEvent::AccountStatusLoaded { request_id, result });
         });
+        *refresh_task = crate::app_server_session::account_status::AccountStatusTask(Some(task));
     }
 
     pub(super) fn manage_accounts(&mut self, server: &AppServerSession, args: &str) {
@@ -109,6 +93,7 @@ impl App {
         }
         let handle = server.request_handle();
         let tx = self.app_event_tx.clone();
+        let invalidations = std::sync::Arc::clone(&server.account_status_invalidations);
         let view = if words.first() == Some(&"usage") {
             AccountReportView::Usage
         } else {
@@ -143,6 +128,8 @@ impl App {
                                 error.to_string()
                             }
                         })?;
+                    invalidations.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .extend(response.usage.iter().map(|usage| usage.account.alias.as_str()));
                     if action == ManagedAccountAction::Select {
                         // Selection returns metadata for the selected alias. Read all accounts'
                         // usage next; pagination must never repeat the selection mutation.

@@ -111,6 +111,24 @@ impl App {
         app_server_client: &AppServerSession,
         notification: ServerNotification,
     ) {
+        if let ServerNotification::ThreadAccountPool(notification) = &notification
+            && self
+                .chat_widget
+                .thread_id()
+                .is_some_and(|id| id.to_string() == notification.thread_id)
+            && matches!(
+                notification.event,
+                codex_protocol::account_pool::AccountPoolEvent::Selected { .. }
+                    | codex_protocol::account_pool::AccountPoolEvent::Switched { .. }
+                    | codex_protocol::account_pool::AccountPoolEvent::Redeemed { .. }
+            )
+        {
+            // Actual use/recovery invalidates an exhausted footer observation without blocking
+            // notification handling on background network reads or spawning another task.
+            app_server_client
+                .account_status_changed
+                .store(/*val*/ true, std::sync::atomic::Ordering::Relaxed);
+        }
         if let ServerNotification::ThreadStatusChanged(status) = &notification {
             let _ = self.dynamic_tool_status_updates.send(status.clone());
         }

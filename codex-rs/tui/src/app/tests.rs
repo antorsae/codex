@@ -4,6 +4,8 @@
 mod account_pool_recovery_tests;
 #[path = "tests/account_pools_tests.rs"]
 mod account_pools_tests;
+#[path = "tests/account_status_lifecycle_tests.rs"]
+mod account_status_lifecycle_tests;
 
 #[path = "tests/daybreak_tests.rs"]
 mod daybreak_tests;

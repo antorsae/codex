@@ -47,7 +47,7 @@ fn pool_weekly_sums_members_until_earliest_reset_including_exhausted_accounts() 
         ..Default::default()
     };
     usages.push(usage("outside"));
-    status.record_usage(&usages, NOW);
+    status.record_usage(&usages, &Default::default(), NOW);
     assert_eq!(
         (status.account_display(NOW), status.pool_display(NOW)),
         (
@@ -69,7 +69,7 @@ fn pool_weekly_sums_members_until_earliest_reset_including_exhausted_accounts() 
     invalid[5][1].account.workspace_id = usages[0].account.workspace_id.clone();
     invalid[6][1].checked_at = NOW + 1;
     for (failure, values) in invalid.into_iter().enumerate() {
-        status.record_usage(&values, NOW);
+        status.record_usage(&values, &Default::default(), NOW);
         assert_eq!(
             (status.account_display(NOW), status.pool_display(NOW)),
             (
@@ -80,13 +80,13 @@ fn pool_weekly_sums_members_until_earliest_reset_including_exhausted_accounts() 
         );
     }
     usages[1].windows[0].resets_at = None;
-    status.record_usage(&usages, NOW);
+    status.record_usage(&usages, &Default::default(), NOW);
     assert_eq!(status.pool_display(NOW), Some("nano 114%".to_owned()));
     usages[1].windows[0].resets_at = Some(NOW - 1);
-    status.record_usage(&usages, NOW);
+    status.record_usage(&usages, &Default::default(), NOW);
     assert_eq!(status.pool_display(NOW), Some("nano 114% due".to_owned()));
     status.pool = None;
-    status.record_usage(&usages, NOW);
+    status.record_usage(&usages, &Default::default(), NOW);
     assert_eq!(status.pool_display(NOW), None);
 }
 
@@ -118,6 +118,29 @@ fn usage(alias: &str) -> ManagedAccountUsage {
 }
 
 #[test]
+fn footer_retains_an_hourly_exhausted_member_until_its_cache_deadline() {
+    let mut active = usage("active");
+    active.checked_at = NOW + 3600;
+    let mut exhausted = usage("empty");
+    exhausted.windows[0].remaining_percent = 0.0;
+    let mut status = AccountStatus {
+        account: Some(active.account.clone()),
+        pool: Some(AccountPool {
+            name: "work".to_owned(),
+            accounts: vec!["active".to_owned(), "empty".to_owned()],
+            redeem_weekly_resets: true,
+        }),
+        ..Default::default()
+    };
+    let deadlines = [("empty".to_owned(), NOW + 3900)].into_iter().collect();
+    status.record_usage(&[active, exhausted], &deadlines, NOW + 3600);
+    insta::assert_snapshot!(format!("{}\n{}", status.pool_display(NOW + 3600).unwrap(), status.pool_display(NOW + 3900).unwrap()), @"
+    work 50% 6d20h
+    work unknown
+    ");
+}
+
+#[test]
 fn weekly_countdown_handles_boundaries_unknown_times_and_stale_data() {
     let mut status = AccountStatus::default();
     let values: Vec<_> = [
@@ -135,6 +158,7 @@ fn weekly_countdown_handles_boundaries_unknown_times_and_stale_data() {
             remaining_percent: 50.0,
             resets_at,
             checked_at: NOW,
+            valid_until: NOW + 15 * 60,
         });
         status.weekly_display(NOW)
     })
@@ -160,6 +184,7 @@ fn weekly_countdown_handles_boundaries_unknown_times_and_stale_data() {
                 remaining_percent,
                 resets_at: None,
                 checked_at: NOW,
+                valid_until: NOW + 15 * 60,
             });
             status.weekly_display(NOW)
         })
@@ -170,6 +195,8 @@ fn weekly_countdown_handles_boundaries_unknown_times_and_stale_data() {
 #[tokio::test]
 async fn managed_footer_refresh_is_scoped_throttled_and_rejects_previous_account_reads() {
     let (mut chat, _tx, mut events, _ops) = make_chatwidget_manual_with_sender().await;
+    let thread_id = ThreadId::new();
+    chat.thread_id = Some(thread_id);
     chat.managed_accounts_active = true;
     chat.local_settings.tui.status_line =
         Some(vec!["account-weekly".to_owned(), "pool-weekly".to_owned()]);
@@ -185,22 +212,19 @@ async fn managed_footer_refresh_is_scoped_throttled_and_rejects_previous_account
     chat.refresh_account_status_if_due();
     let AppEvent::RefreshAccountStatus {
         request_id: first,
-        account,
-        pool: requested_pool,
+        thread_id: requested_thread,
+        include_pool_usage,
     } = events.try_recv().unwrap()
     else {
         panic!("expected selected account read");
     };
-    assert_eq!(
-        (account, requested_pool),
-        (a.account.clone(), Some(pool.clone()))
-    );
+    assert_eq!((requested_thread, include_pool_usage), (thread_id, true));
     chat.refresh_account_status_if_due();
     assert!(events.try_recv().is_err());
 
     chat.handle_server_notification(
         ServerNotification::ThreadAccountPool(ThreadAccountPoolNotification {
-            thread_id: "thread-test".to_owned(),
+            thread_id: thread_id.to_string(),
             event: AccountPoolEvent::Selected {
                 account: b.account.clone(),
             },
@@ -214,16 +238,32 @@ async fn managed_footer_refresh_is_scoped_throttled_and_rejects_previous_account
     chat.refresh_account_status_if_due();
     let AppEvent::RefreshAccountStatus {
         request_id: second,
-        account,
-        pool: requested_pool,
+        thread_id: requested_thread,
+        include_pool_usage,
     } = events.try_recv().unwrap()
     else {
         panic!("expected new account read");
     };
-    assert_eq!((account, requested_pool), (b.account.clone(), Some(pool)));
-    chat.finish_account_status(first, Ok(vec![a]));
+    assert_eq!((requested_thread, include_pool_usage), (thread_id, true));
+    chat.finish_account_status(
+        first,
+        Ok(AccountStatusSnapshot {
+            account: Some(a.account.clone()),
+            pool: Some(pool.clone()),
+            usage: vec![a],
+            ..Default::default()
+        }),
+    );
     assert_eq!(chat.account_status.weekly_display(NOW), None);
-    chat.finish_account_status(second, Ok(vec![b.clone()]));
+    chat.finish_account_status(
+        second,
+        Ok(AccountStatusSnapshot {
+            account: Some(b.account.clone()),
+            pool: Some(pool.clone()),
+            usage: vec![b.clone()],
+            ..Default::default()
+        }),
+    );
     assert_eq!(
         chat.account_status.weekly_display(NOW),
         Some("75% 6d21h".to_owned())
@@ -237,14 +277,22 @@ async fn managed_footer_refresh_is_scoped_throttled_and_rejects_previous_account
         panic!("expected next scheduled read");
     };
     b.error = Some("usage unavailable".to_owned());
-    chat.finish_account_status(request_id, Ok(vec![b]));
+    chat.finish_account_status(
+        request_id,
+        Ok(AccountStatusSnapshot {
+            account: Some(b.account.clone()),
+            pool: Some(pool),
+            usage: vec![b],
+            ..Default::default()
+        }),
+    );
     assert_eq!(chat.account_status.weekly_display(NOW), None);
     assert_eq!(chat.rate_limit_refresh_interval(), None);
 }
 
 #[tokio::test]
 async fn legacy_footer_uses_account_wide_weekly_quota_and_clears_on_identity_change() {
-    let (mut chat, _tx, _events, _ops) = make_chatwidget_manual_with_sender().await;
+    let (mut chat, _tx, mut events, _ops) = make_chatwidget_manual_with_sender().await;
     let now = Local::now().timestamp();
     let snapshot = RateLimitSnapshot {
         limit_id: None,
@@ -270,6 +318,23 @@ async fn legacy_footer_uses_account_wide_weekly_quota_and_clears_on_identity_cha
     assert_eq!(
         chat.account_status.weekly_display(now),
         Some("50% 1h30m".to_owned())
+    );
+    chat.thread_id = Some(ThreadId::new());
+    chat.local_settings.tui.status_line = Some(vec!["weekly-limit-with-reset".to_owned()]);
+    chat.refresh_account_status_if_due();
+    let request_id = std::iter::from_fn(|| events.try_recv().ok())
+        .find_map(|event| match event {
+            AppEvent::RefreshAccountStatus { request_id, .. } => Some(request_id),
+            _ => None,
+        })
+        .expect("thread account resolution");
+    chat.finish_account_status(request_id, Ok(AccountStatusSnapshot::default()));
+    assert_eq!(
+        (
+            chat.managed_accounts_active,
+            chat.account_status.weekly_display(now)
+        ),
+        (false, Some("50% 1h30m".to_owned()))
     );
     chat.on_rate_limit_snapshot(Some(RateLimitSnapshot {
         limit_id: Some("codex_other".to_owned()),

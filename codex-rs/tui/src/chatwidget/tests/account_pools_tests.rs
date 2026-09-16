@@ -13,6 +13,7 @@ async fn configured_account_footer_and_picker_snapshot() {
     use ratatui::backend::TestBackend;
 
     let (mut chat, mut events, _ops) = make_chatwidget_manual(Some("gpt-5.4")).await;
+    chat.thread_id = Some(ThreadId::new());
     set_chatgpt_auth(&mut chat);
     set_fast_mode_test_catalog(&mut chat);
     chat.show_welcome_banner = false;
@@ -65,17 +66,15 @@ async fn configured_account_footer_and_picker_snapshot() {
         })
         .collect();
     chat.managed_accounts_active = true;
-    chat.initialize_managed_account_status(
-        Some(usages[0].account.clone()),
-        Some(AccountPool {
-            name: "nano".to_owned(),
-            accounts: usages
-                .iter()
-                .map(|usage| usage.account.alias.clone())
-                .collect(),
-            redeem_weekly_resets: true,
-        }),
-    );
+    let pool = AccountPool {
+        name: "nano".to_owned(),
+        accounts: usages
+            .iter()
+            .map(|usage| usage.account.alias.clone())
+            .collect(),
+        redeem_weekly_resets: true,
+    };
+    chat.initialize_managed_account_status(Some(usages[0].account.clone()), Some(pool.clone()));
     chat.refresh_account_status_if_due();
     let request_id = loop {
         if let AppEvent::RefreshAccountStatus { request_id, .. } =
@@ -84,7 +83,15 @@ async fn configured_account_footer_and_picker_snapshot() {
             break request_id;
         }
     };
-    chat.finish_account_status(request_id, Ok(usages));
+    chat.finish_account_status(
+        request_id,
+        Ok(AccountStatusSnapshot {
+            account: Some(usages[0].account.clone()),
+            pool: Some(pool),
+            usage: usages,
+            ..Default::default()
+        }),
+    );
     drain_insert_history(&mut events);
     for width in [140, 80] {
         let mut terminal =

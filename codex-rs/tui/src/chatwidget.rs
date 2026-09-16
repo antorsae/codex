@@ -426,6 +426,7 @@ use self::status_state::StatusIndicatorState;
 use self::status_state::StatusState;
 use self::status_state::TerminalTitleStatusKind;
 mod account_status;
+pub(crate) use self::account_status::AccountStatusSnapshot;
 mod status_controls;
 mod status_surfaces;
 mod streaming;

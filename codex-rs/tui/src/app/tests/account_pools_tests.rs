@@ -1,4 +1,5 @@
 use super::*;
+use codex_protocol::account_pool::AccountSelection;
 use core_test_support::account_pools;
 use pretty_assertions::assert_eq;
 
@@ -17,7 +18,7 @@ async fn account_selection_refreshes_all_quota_and_pool_list_renders_server_data
         ),
     )?;
     let config = core_test_support::load_default_config_for_test(&home).await;
-    let session = crate::start_embedded_app_server_for_picker(&config).await?;
+    let mut session = crate::start_embedded_app_server_for_picker(&config).await?;
     let (mut app, mut events, _ops) = make_test_app_with_channels().await;
     for (command, label) in [
         ("", "current login"),
@@ -69,8 +70,17 @@ async fn account_selection_refreshes_all_quota_and_pool_list_renders_server_data
         email: Some("b@example.com".to_owned()),
         plan: Some("pro".to_owned()),
     };
+    let mut selected_config = config.clone();
+    selected_config.account_selection = Some(AccountSelection::Account("b".to_owned()));
+    let thread_id = session
+        .start_thread(&selected_config)
+        .await?
+        .session
+        .thread_id;
     let request_id = uuid::Uuid::new_v4();
-    app.refresh_account_status(&session, request_id, account.clone(), /*pool*/ None);
+    app.refresh_account_status(
+        &session, request_id, thread_id, /*include_pool_usage*/ false,
+    );
     let AppEvent::AccountStatusLoaded {
         request_id: received_id,
         result,
@@ -80,6 +90,7 @@ async fn account_selection_refreshes_all_quota_and_pool_list_renders_server_data
     };
     let usage = result
         .map_err(|error| color_eyre::eyre::eyre!("{error}"))?
+        .usage
         .pop()
         .expect("account usage");
     assert_eq!(
@@ -111,15 +122,17 @@ async fn account_selection_refreshes_all_quota_and_pool_list_renders_server_data
     expected.push("workspace-b");
     assert_eq!(identities, expected);
 
+    selected_config.account_selection = Some(AccountSelection::Pool("work".to_owned()));
+    let thread_id = session
+        .start_thread(&selected_config)
+        .await?
+        .session
+        .thread_id;
     app.refresh_account_status(
         &session,
         uuid::Uuid::new_v4(),
-        usage.account,
-        Some(codex_protocol::account_pool::AccountPool {
-            name: "work".to_owned(),
-            accounts: vec!["a".to_owned(), "b".to_owned()],
-            redeem_weekly_resets: true,
-        }),
+        thread_id,
+        /*include_pool_usage*/ true,
     );
     let AppEvent::AccountStatusLoaded { result, .. } =
         events.recv().await.expect("pool footer usage")
@@ -128,6 +141,7 @@ async fn account_selection_refreshes_all_quota_and_pool_list_renders_server_data
     };
     let mut aliases: Vec<_> = result
         .map_err(|error| color_eyre::eyre::eyre!("{error}"))?
+        .usage
         .into_iter()
         .map(|usage| usage.account.alias)
         .collect();
@@ -158,6 +172,144 @@ async fn account_selection_refreshes_all_quota_and_pool_list_renders_server_data
             .contains("| b | b\\@example\\.com | pro | Unknown | Unknown | Unknown |")
     );
     assert_eq!(report.markdown.matches("Usage unavailable:").count(), 2);
+    session.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn manual_account_usage_and_redemption_refresh_inactive_footer_members() -> Result<()> {
+    use wiremock::Mock;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers::header;
+    use wiremock::matchers::method;
+    use wiremock::matchers::path;
+
+    let home = tempfile::tempdir()?;
+    let backend = wiremock::MockServer::start().await;
+    account_pools::setup(&home, &backend)
+        .await
+        .map_err(|error| color_eyre::eyre::eyre!("{error}"))?;
+    std::fs::write(
+        home.path().join("config.toml"),
+        format!(
+            "cli_auth_credentials_store = \"file\"\nchatgpt_base_url = {:?}\n",
+            backend.uri()
+        ),
+    )?;
+    let mut config = core_test_support::load_default_config_for_test(&home).await;
+    config.account_selection = Some(AccountSelection::Pool("work".to_owned()));
+    let redeemed = Arc::new(AtomicBool::new(false));
+    let observed = Arc::clone(&redeemed);
+    Mock::given(method("GET")).and(path("/api/codex/usage"))
+        .and(header("chatgpt-account-id", "workspace-a"))
+        .respond_with(move |_: &wiremock::Request| {
+            let recovered = observed.load(Ordering::Relaxed);
+            let used = if recovered { 10 } else { 100 };
+            ResponseTemplate::new(/*s*/ 200).set_body_json(serde_json::json!({
+                "plan_type": "pro", "user_id": "user-a", "account_id": "workspace-a",
+                "rate_limit": {"allowed": recovered, "limit_reached": !recovered,
+                    "primary_window": {"used_percent": used, "limit_window_seconds": 18000, "reset_after_seconds": 3600, "reset_at": 2_000_000_000i64},
+                    "secondary_window": {"used_percent": used, "limit_window_seconds": 604800, "reset_after_seconds": 3600, "reset_at": 2_000_000_000i64}},
+                "rate_limit_reset_credits": {"available_count": if recovered { 0 } else { 1 }},
+            }))
+        }).with_priority(/*p*/ 1).mount(&backend).await;
+    Mock::given(method("GET")).and(path("/api/codex/rate-limit-reset-credits"))
+        .respond_with(ResponseTemplate::new(/*s*/ 200).set_body_json(serde_json::json!({
+            "available_count": 1, "credits": [{"id": "credit", "reset_type": "codex_rate_limits", "status": "available", "granted_at": "2026-01-01T00:00:00Z"}]
+        }))).mount(&backend).await;
+    Mock::given(method("POST"))
+        .and(path("/api/codex/rate-limit-reset-credits/consume"))
+        .respond_with(move |_: &wiremock::Request| {
+            redeemed.store(/*val*/ true, Ordering::Relaxed);
+            ResponseTemplate::new(/*s*/ 200).set_body_json(serde_json::json!({"code": "reset"}))
+        })
+        .expect(/*n*/ 1)
+        .mount(&backend)
+        .await;
+
+    let mut session = crate::start_embedded_app_server_for_picker(&config).await?;
+    let (mut app, mut events, _ops) = make_test_app_with_channels().await;
+    app.manage_pools(&session, "update work b a");
+    let AppEvent::ManagedAccountOutput { result } = events.recv().await.expect("pool report")
+    else {
+        panic!("expected pool report");
+    };
+    result.map_err(color_eyre::eyre::Report::msg)?;
+    let thread_id = session.start_thread(&config).await?.session.thread_id;
+    let handle = session.request_handle();
+    for (command, remaining) in [
+        (None, 0.0),
+        (Some("usage a"), 0.0),
+        (Some("redeem a"), 90.0),
+    ] {
+        if let Some(command) = command {
+            app.manage_accounts(&session, command);
+            let AppEvent::ManagedAccountOutput { result } =
+                time::timeout(Duration::from_secs(/*secs*/ 15), events.recv())
+                    .await?
+                    .expect("manual account report")
+            else {
+                panic!("expected manual account report");
+            };
+            result.map_err(color_eyre::eyre::Report::msg)?;
+        }
+        let before = backend.received_requests().await.expect("requests").len();
+        let snapshot = crate::app_server_session::account_status::load(
+            &handle,
+            &session.account_status_cache,
+            &session.account_status_changed,
+            &session.account_status_invalidations,
+            thread_id,
+            /*include_pool_usage*/ true,
+        )
+        .await
+        .map_err(color_eyre::eyre::Report::msg)?;
+        assert_eq!(
+            snapshot
+                .account
+                .as_ref()
+                .map(|account| account.alias.as_str()),
+            Some("b")
+        );
+        let a = snapshot
+            .usage
+            .iter()
+            .find(|usage| usage.account.alias == "a")
+            .expect("inactive quota");
+        assert_eq!(
+            a.windows
+                .iter()
+                .map(|window| window.remaining_percent)
+                .collect::<Vec<_>>(),
+            vec![remaining, remaining]
+        );
+        let requests = backend.received_requests().await.expect("requests");
+        let mut refreshed: Vec<_> = requests[before..]
+            .iter()
+            .filter(|request| request.url.path() == "/api/codex/usage")
+            .map(|request| {
+                (
+                    request.url.path(),
+                    request.headers["chatgpt-account-id"]
+                        .to_str()
+                        .expect("account header"),
+                )
+            })
+            .collect();
+        refreshed.sort();
+        assert_eq!(
+            refreshed,
+            if command.is_none() {
+                vec![
+                    ("/api/codex/usage", "workspace-a"),
+                    ("/api/codex/usage", "workspace-b"),
+                ]
+            } else {
+                vec![("/api/codex/usage", "workspace-a")]
+            }
+        );
+    }
+    drop(handle);
     session.shutdown().await?;
     Ok(())
 }
