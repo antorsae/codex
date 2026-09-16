@@ -447,7 +447,17 @@ impl PoolSession {
                         }
                     } else { failures = 0; }
                     notify(AccountPoolEvent::Waiting { account: current.alias.clone(), reason, next_check_at: next });
-                    tokio::time::sleep(Duration::from_secs((next - now).max(1) as u64)).await;
+                    let deadline = tokio::time::Instant::now() + Duration::from_secs((next - now).max(1) as u64);
+                    loop {
+                        let config_check = tokio::time::Instant::now() + Duration::from_secs(/*secs*/ 60);
+                        tokio::time::sleep_until(deadline.min(config_check)).await;
+                        // Long quota waits must still notice local membership/policy edits,
+                        // without repeating the entire pool's network reads every minute.
+                        if tokio::time::Instant::now() >= deadline
+                            || read_membership().ok().as_ref() != Some(&membership) {
+                            break;
+                        }
+                    }
                 }
             } => result,
         }

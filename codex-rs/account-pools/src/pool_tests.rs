@@ -25,6 +25,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use tokio_util::sync::CancellationToken;
 use wiremock::Mock;
@@ -37,6 +38,9 @@ mod pool_reload;
 
 #[path = "continuity_tests.rs"]
 mod continuity;
+
+#[path = "waiting_tests.rs"]
+mod waiting;
 
 pub(super) fn account(alias: &str) -> ManagedAccount {
     ManagedAccount {
@@ -200,7 +204,7 @@ fn all_weekly_exhausted_chooses_most_resets_then_earliest_expiry() {
             /*redeem_weekly*/ false,
             /*now*/ 1000
         ),
-        Decision::Wait(PoolWaitReason::WeeklyQuota, 1030)
+        Decision::Wait(PoolWaitReason::WeeklyQuota, 4600)
     );
 }
 
@@ -346,7 +350,7 @@ fn model_specific_windows_and_unsupported_models_are_respected() {
 }
 
 #[test]
-fn expired_credits_and_unknown_credit_details_wait_until_the_earliest_reset() {
+fn expired_credits_and_unknown_credit_details_wait_for_weekly_reset_or_missing_reset_probe() {
     let mut reading = with_credits(
         usage(
             "a", /*short*/ 90.0, /*weekly*/ 0.0, /*now*/ 1000,
@@ -362,7 +366,7 @@ fn expired_credits_and_unknown_credit_details_wait_until_the_earliest_reset() {
             /*redeem_weekly*/ true,
             /*now*/ 1000
         ),
-        Decision::Wait(PoolWaitReason::WeeklyQuota, 1030)
+        Decision::Wait(PoolWaitReason::WeeklyQuota, 4600)
     );
     reading.resets = None;
     for window in &mut reading.windows {
@@ -495,6 +499,7 @@ async fn imported_login_tracks_canonical_credentials_without_changing_a_later_lo
 #[derive(Default)]
 struct FakeBackend {
     usage: Mutex<HashMap<String, ManagedAccountUsage>>,
+    usage_calls: AtomicUsize,
     calls: Mutex<Vec<(String, String)>>,
     fail_once: AtomicBool,
     outcome_once: Mutex<Option<ConsumeRateLimitResetCreditCode>>,
@@ -516,6 +521,7 @@ impl FakeBackend {
 
 impl AccountBackend for FakeBackend {
     async fn usage(&self, account: &ManagedAccount, _model: Option<&str>) -> ManagedAccountUsage {
+        self.usage_calls.fetch_add(/*val*/ 1, Ordering::SeqCst);
         self.usage.lock().unwrap()[&account.alias].clone()
     }
     async fn redeem(

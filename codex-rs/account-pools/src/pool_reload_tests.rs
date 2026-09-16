@@ -250,7 +250,7 @@ async fn edits_during_usage_reads_invalidate_switches_and_reset_permission() {
             vec![AccountPoolEvent::Waiting {
                 account: "a".to_owned(),
                 reason: PoolWaitReason::WeeklyQuota,
-                next_check_at: now + 30,
+                next_check_at: now + 3600,
             }]
         );
         assert_eq!(session.pool(), Some(replacement));

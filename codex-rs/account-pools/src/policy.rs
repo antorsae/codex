@@ -145,13 +145,44 @@ pub(crate) fn decide(
     } else {
         PoolWaitReason::ShortWindow
     };
-    let next = usages
-        .iter()
-        .flat_map(|usage| &usage.windows)
-        .filter_map(|window| window.resets_at)
-        .filter(|reset| *reset > now)
-        .min()
-        .unwrap_or(now + 60)
-        .min(now + 60);
+    let next = if reason == PoolWaitReason::WeeklyQuota {
+        let retry_credit_details = redeem_weekly
+            && eligible.iter().any(|(_, usage)| {
+                usage.available_resets != Some(0)
+                    && (usage.resets.is_none()
+                        || (usage.available_resets.is_none()
+                            && earliest_credit(usage, now).is_some()))
+            });
+        // Short-window resets cannot restore an exhausted weekly allowance. Probe at least
+        // hourly for out-of-band resets. Missing quota reset times or credit metadata needed
+        // for automatic redemption retain the normal interval.
+        eligible
+            .iter()
+            .flat_map(|(_, usage)| {
+                usage.windows.iter().filter(|window| {
+                    applicable(usage, window)
+                        && window.window_minutes > 24 * 60
+                        && window.remaining_percent <= 0.0
+                })
+            })
+            .map(|window| {
+                window
+                    .resets_at
+                    .filter(|reset| *reset > now)
+                    .unwrap_or(now + 60)
+            })
+            .min()
+            .unwrap_or(now + 60)
+            .min(now + if retry_credit_details { 60 } else { 3600 })
+    } else {
+        usages
+            .iter()
+            .flat_map(|usage| &usage.windows)
+            .filter_map(|window| window.resets_at)
+            .filter(|reset| *reset > now)
+            .min()
+            .unwrap_or(now + 60)
+            .min(now + 60)
+    };
     Decision::Wait(reason, next)
 }
