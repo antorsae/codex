@@ -619,6 +619,7 @@ impl Session {
             crate::account_pools::initialize(&config, &auth_manager, resume_id.as_deref())
                 .await
                 .map_err(|error| CodexErr::Fatal(error.to_string()))?;
+        let has_managed_account = pool_session.is_some();
         config.account_selection_source_thread_id = None;
         let (auth_manager, models_manager) = if let Some(pool) = pool_session {
             config.account_selection = Some(pool.selection().clone());
@@ -631,7 +632,8 @@ impl Session {
             (auth_manager, models_manager)
         };
         let mut config = Arc::new(config);
-        let refresh_strategy = if session_source.is_non_root_agent() {
+        // Managed sessions construct a fresh uncached manager, including child agents.
+        let refresh_strategy = if session_source.is_non_root_agent() && !has_managed_account {
             codex_models_manager::manager::RefreshStrategy::Offline
         } else {
             codex_models_manager::manager::RefreshStrategy::OnlineIfUncached

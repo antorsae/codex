@@ -12,6 +12,9 @@ use wiremock::MockServer;
 #[path = "account_pool_continuity_tests.rs"]
 mod continuity;
 
+#[path = "account_pool_failure_classification_tests.rs"]
+mod failure_classification;
+
 async fn recovery_preserves_completed_tools(failure: QuotaFailure) -> Result<()> {
     let server = MockServer::start().await;
     let home = Arc::new(TempDir::new()?);

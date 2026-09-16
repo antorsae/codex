@@ -1,4 +1,6 @@
 mod account_pool_compaction;
+#[path = "account_pool_startup_compaction_tests.rs"]
+mod account_pool_startup_compaction;
 mod account_pools;
 // Aggregates all former standalone integration tests as modules.
 use codex_apply_patch::CODEX_CORE_APPLY_PATCH_ARG1;
