@@ -11,6 +11,10 @@ use codex_protocol::account_pool::ManagedAccountUsage;
 use std::future::Future;
 use std::time::Duration;
 
+#[cfg(test)]
+#[path = "backend_tests.rs"]
+mod tests;
+
 /// The coordinator's network boundary. Implementations must return fresh, identity-checked
 /// observations and must preserve the caller's idempotency key on every redemption attempt.
 pub(crate) trait AccountBackend: Send + Sync {
@@ -25,6 +29,12 @@ pub(crate) trait AccountBackend: Send + Sync {
         key: &str,
         credit: &str,
     ) -> impl Future<Output = Result<ConsumeRateLimitResetCreditCode>> + Send;
+}
+
+#[derive(Clone, Copy)]
+enum UsageDetails<'a> {
+    Quota,
+    Full { model: Option<&'a str> },
 }
 
 #[derive(Clone)]
@@ -43,6 +53,11 @@ impl ManagedBackend {
         model: Option<&str>,
     ) -> ManagedAccountUsage {
         <Self as AccountBackend>::usage(self, account, model).await
+    }
+
+    /// Read quota windows and reset counts without fetching model or reset-credit details.
+    pub async fn quota(&self, account: &ManagedAccount) -> ManagedAccountUsage {
+        self.observe_usage(account, UsageDetails::Quota).await
     }
 
     async fn client(
@@ -74,7 +89,7 @@ impl ManagedBackend {
         account: &ManagedAccount,
         model: Option<&str>,
         result: &mut ManagedAccountUsage,
-    ) -> Result<()> {
+    ) -> Result<Client> {
         let (mut client, manager) = self.client(account).await?;
         let usage = match client.get_rate_limits_with_reset_credits().await {
             Err(error)
@@ -139,37 +154,18 @@ impl ManagedBackend {
                     .any(|slug| slug == model),
             );
         }
-        // Reset details are a separate runtime capability. Failure never authorizes a reset.
-        if let Ok(details) = client.list_rate_limit_reset_credits().await {
-            let now = chrono::Utc::now().timestamp();
-            let mut credits = Vec::new();
-            for credit in details.credits {
-                if credit.status != "available" || credit.reset_type != "codex_rate_limits" {
-                    continue;
-                }
-                let expires_at = match credit.expires_at {
-                    Some(value) => match chrono::DateTime::parse_from_rfc3339(&value) {
-                        Ok(value) => Some(value.timestamp()),
-                        Err(_) => continue,
-                    },
-                    None => None,
-                };
-                if expires_at.is_none_or(|expiration| expiration > now) {
-                    credits.push(BankedReset {
-                        id: credit.id,
-                        expires_at,
-                    });
-                }
-            }
-            result.available_resets = Some(details.available_count);
-            result.resets = Some(credits);
-        }
-        Ok(())
+        Ok(client)
     }
-}
 
-impl AccountBackend for ManagedBackend {
-    async fn usage(&self, account: &ManagedAccount, model: Option<&str>) -> ManagedAccountUsage {
+    async fn observe_usage(
+        &self,
+        account: &ManagedAccount,
+        details: UsageDetails<'_>,
+    ) -> ManagedAccountUsage {
+        let model = match details {
+            UsageDetails::Quota => None,
+            UsageDetails::Full { model } => model,
+        };
         let mut result = ManagedAccountUsage {
             account: self
                 .store
@@ -204,22 +200,61 @@ impl AccountBackend for ManagedBackend {
             checked_at: chrono::Utc::now().timestamp(),
             error: None,
         };
-        if !matches!(
-            tokio::time::timeout(
-                Duration::from_secs(20),
-                self.read_usage(account, model, &mut result)
-            )
-            .await,
-            Ok(Ok(()))
-        ) {
-            // Backend errors may contain response bodies or credential-bearing URLs.
-            result.error =
-                Some("Authentication or usage lookup failed; availability is unknown".to_owned());
-            result.ordinary_usage_allowed = None;
-            result.model_supported = None;
-            result.resets = None;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(/*secs*/ 20);
+        let client =
+            match tokio::time::timeout_at(deadline, self.read_usage(account, model, &mut result))
+                .await
+            {
+                Ok(Ok(client)) => client,
+                Ok(Err(_)) | Err(_) => {
+                    // Backend errors may contain response bodies or credential-bearing URLs.
+                    result.error = Some(
+                        "Authentication or usage lookup failed; availability is unknown".to_owned(),
+                    );
+                    result.ordinary_usage_allowed = None;
+                    result.model_supported = None;
+                    result.resets = None;
+                    return result;
+                }
+            };
+        if matches!(details, UsageDetails::Quota) {
+            return result;
+        }
+        // Optional reset details share the deadline but cannot invalidate verified quota.
+        if let Ok(Ok(details)) =
+            tokio::time::timeout_at(deadline, client.list_rate_limit_reset_credits()).await
+        {
+            let now = chrono::Utc::now().timestamp();
+            let mut credits = Vec::new();
+            for credit in details.credits {
+                if credit.status != "available" || credit.reset_type != "codex_rate_limits" {
+                    continue;
+                }
+                let expires_at = match credit.expires_at {
+                    Some(value) => match chrono::DateTime::parse_from_rfc3339(&value) {
+                        Ok(value) => Some(value.timestamp()),
+                        Err(_) => continue,
+                    },
+                    None => None,
+                };
+                if expires_at.is_none_or(|expiration| expiration > now) {
+                    credits.push(BankedReset {
+                        id: credit.id,
+                        expires_at,
+                    });
+                }
+            }
+            result.available_resets = Some(details.available_count);
+            result.resets = Some(credits);
         }
         result
+    }
+}
+
+impl AccountBackend for ManagedBackend {
+    async fn usage(&self, account: &ManagedAccount, model: Option<&str>) -> ManagedAccountUsage {
+        self.observe_usage(account, UsageDetails::Full { model })
+            .await
     }
 
     async fn redeem(
