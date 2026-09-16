@@ -7,11 +7,8 @@ use sha2::Sha256;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::File;
-use std::fs::OpenOptions;
 use std::io::Read;
 use std::io::Write;
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -204,21 +201,33 @@ impl AuthStorageBackend for FileAuthStorage {
     }
 
     fn save(&self, auth_dot_json: &AuthDotJson) -> std::io::Result<()> {
-        let auth_file = get_auth_file(&self.codex_home);
-
-        if let Some(parent) = auth_file.parent() {
-            std::fs::create_dir_all(parent)?;
+        let mut auth_file = get_auth_file(&self.codex_home);
+        // Follow links before atomic replacement, including links to a not-yet-created file.
+        for depth in 0..=40 {
+            match std::fs::symlink_metadata(&auth_file) {
+                Ok(metadata) if metadata.is_symlink() => {
+                    if depth == 40 {
+                        return Err(std::io::Error::other("Too many auth file symbolic links"));
+                    }
+                    let target = std::fs::read_link(&auth_file)?;
+                    auth_file.pop();
+                    auth_file.push(target);
+                }
+                Ok(_) => break,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+                Err(error) => return Err(error),
+            }
         }
+        let parent = auth_file
+            .parent()
+            .ok_or_else(|| std::io::Error::other("Auth file must have a parent directory"))?;
+        std::fs::create_dir_all(parent)?;
         let json_data = serde_json::to_string_pretty(auth_dot_json)?;
-        let mut options = OpenOptions::new();
-        options.truncate(true).write(true).create(true);
-        #[cfg(unix)]
-        {
-            options.mode(0o600);
-        }
-        let mut file = options.open(auth_file)?;
+        // Readers must see either complete credential snapshot, including during refresh.
+        let mut file = tempfile::NamedTempFile::new_in(parent)?;
         file.write_all(json_data.as_bytes())?;
-        file.flush()?;
+        file.as_file().sync_all()?;
+        file.persist(auth_file)?;
         Ok(())
     }
 
