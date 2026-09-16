@@ -2205,6 +2205,7 @@ class ManagedAccountAction(Enum):
     select = "select"
     remove = "remove"
     usage = "usage"
+    quota = "quota"
     redeem = "redeem"
     resolve = "resolve"
     models = "models"

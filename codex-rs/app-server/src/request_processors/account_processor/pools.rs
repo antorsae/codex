@@ -17,6 +17,7 @@ use codex_app_server_protocol::ManagedPoolParams;
 use codex_app_server_protocol::ManagedPoolResponse;
 use codex_app_server_protocol::ServerNotification;
 use codex_protocol::account_pool::AccountSelection;
+use futures::StreamExt;
 use uuid::Uuid;
 
 impl AccountRequestProcessor {
@@ -77,6 +78,9 @@ impl AccountRequestProcessor {
                     });
                 let pool = match pool {
                     Some(pool) => Some(pool),
+                    // A loaded thread without managed auth must not acquire a later default
+                    // selection merely because a client reads its account status.
+                    None if loaded.is_some() && params.account_selection.is_none() => None,
                     None => {
                         codex_core::initialize_account_pool(
                             &config,
@@ -196,7 +200,9 @@ impl AccountRequestProcessor {
             ManagedAccountAction::Redeem => {
                 usage.push(store.redeem(alias()?, params.model.as_deref()).await?);
             }
-            ManagedAccountAction::List | ManagedAccountAction::Usage => {}
+            ManagedAccountAction::List
+            | ManagedAccountAction::Usage
+            | ManagedAccountAction::Quota => {}
         }
         let mut state = store.read()?;
         state.accounts.sort_by(|a, b| a.alias.cmp(&b.alias));
@@ -205,7 +211,9 @@ impl AccountRequestProcessor {
             if state.accounts.is_empty()
                 && matches!(
                     params.action,
-                    ManagedAccountAction::Usage | ManagedAccountAction::List
+                    ManagedAccountAction::Usage
+                        | ManagedAccountAction::Quota
+                        | ManagedAccountAction::List
                 )
             {
                 anyhow::bail!("Unknown account: {alias}");
@@ -214,11 +222,29 @@ impl AccountRequestProcessor {
         let (data, next_cursor) = page(state.accounts, params.cursor, params.limit, |account| {
             &account.alias
         })?;
-        if params.action == ManagedAccountAction::Usage {
+        if matches!(
+            params.action,
+            ManagedAccountAction::Usage | ManagedAccountAction::Quota
+        ) {
             let backend = ManagedBackend::new(store);
-            for account in &data {
-                usage.push(backend.usage(account, params.model.as_deref()).await);
-            }
+            let model = params.model;
+            let action = params.action;
+            usage = futures::stream::iter(data.clone())
+                .map(move |account| {
+                    let backend = backend.clone();
+                    let model = model.clone();
+                    let action = action.clone();
+                    async move {
+                        if action == ManagedAccountAction::Quota {
+                            backend.quota(&account).await
+                        } else {
+                            backend.usage(&account, model.as_deref()).await
+                        }
+                    }
+                })
+                .buffered(/*n*/ 32)
+                .collect()
+                .await;
         }
         Ok(ManagedAccountResponse {
             resolved,

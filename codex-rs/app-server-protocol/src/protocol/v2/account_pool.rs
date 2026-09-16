@@ -18,6 +18,7 @@ pub enum ManagedAccountAction {
     Select,
     Remove,
     Usage,
+    Quota,
     Redeem,
     Resolve,
     Models,

@@ -19,6 +19,122 @@ use wiremock::MockServer;
 mod continuity;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn account_quota_returns_lightweight_usage_without_extra_backend_reads() -> Result<()> {
+    let backend = MockServer::start().await;
+    let home = TempDir::new()?;
+    account_pools::setup(&home, &backend).await?;
+    std::fs::write(
+        home.path().join("config.toml"),
+        format!(
+            "model = \"gpt-5.5\"\ncli_auth_credentials_store = \"file\"\nchatgpt_base_url = {:?}\nopenai_base_url = {:?}\n",
+            backend.uri(),
+            format!("{}/v1", backend.uri())
+        ),
+    )?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .build_initialized()
+        .await?;
+    let request = server
+        .send_request(
+            "account/manage",
+            Some(json!({"action": "quota", "alias": "b", "model": "not-queried"})),
+        )
+        .await?;
+    let response: ManagedAccountResponse = server.read_response(request).await?;
+    let usage = response.usage.first().expect("quota observation");
+    assert_eq!(
+        response.usage,
+        vec![codex_protocol::account_pool::ManagedAccountUsage {
+            account: response.data[0].clone(),
+            pools: vec!["work".to_owned()],
+            model: None,
+            model_supported: None,
+            ordinary_usage_allowed: Some(true),
+            windows: [300, 10080]
+                .into_iter()
+                .map(|window_minutes| {
+                    codex_protocol::account_pool::AccountQuotaWindow {
+                        limit_id: "codex".to_owned(),
+                        model: None,
+                        remaining_percent: 90.0,
+                        window_minutes,
+                        resets_at: Some(2_000_000_000),
+                    }
+                })
+                .collect(),
+            available_resets: Some(0),
+            resets: None,
+            checked_at: usage.checked_at,
+            error: None,
+        }]
+    );
+    let requests = backend
+        .received_requests()
+        .await
+        .expect("recorded backend requests");
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| request.url.path())
+            .collect::<Vec<_>>(),
+        vec!["/api/codex/usage"]
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn account_resolution_preserves_loaded_legacy_thread_after_default_changes() -> Result<()> {
+    let backend = MockServer::start().await;
+    let home = TempDir::new()?;
+    account_pools::setup(&home, &backend).await?;
+    std::fs::write(
+        home.path().join("config.toml"),
+        format!(
+            "model = \"gpt-5.5\"\ncli_auth_credentials_store = \"file\"\nchatgpt_base_url = {:?}\nopenai_base_url = {:?}\n",
+            backend.uri(),
+            format!("{}/v1", backend.uri())
+        ),
+    )?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .build_initialized()
+        .await?;
+    let thread = server.start_thread(ThreadStartParams::default()).await?;
+    let request = server
+        .send_request(
+            "pool/manage",
+            Some(json!({"action": "select", "name": "work"})),
+        )
+        .await?;
+    let _: codex_app_server_protocol::ManagedPoolResponse = server.read_response(request).await?;
+    let mut selections = Vec::new();
+    for params in [
+        json!({"action": "resolve"}),
+        json!({"action": "resolve", "threadId": thread.thread.id}),
+        json!({"action": "resolve", "threadId": thread.thread.id,
+            "accountSelection": {"type": "account", "name": "b"}}),
+    ] {
+        let request = server.send_request("account/manage", Some(params)).await?;
+        let response: ManagedAccountResponse = server.read_response(request).await?;
+        selections.push((
+            response.resolved.is_some(),
+            response.selected_account.map(|account| account.alias),
+            response.selected_pool.map(|pool| pool.name),
+        ));
+    }
+    assert_eq!(
+        selections,
+        vec![
+            (true, Some("a".to_owned()), Some("work".to_owned())),
+            (false, None, None),
+            (true, Some("b".to_owned()), None),
+        ]
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn account_pool_management_and_partial_stream_recovery() -> Result<()> {
     let backend = MockServer::start().await;
     let home = TempDir::new()?;

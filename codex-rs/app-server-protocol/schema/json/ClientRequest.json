@@ -2010,6 +2010,7 @@
         "select",
         "remove",
         "usage",
+        "quota",
         "redeem",
         "resolve",
         "models"

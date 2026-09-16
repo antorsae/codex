@@ -148,6 +148,37 @@ macro_rules! serialization_scope_expr {
     ($actual_params:ident, global_shared_read($key:literal)) => {
         Some(ClientRequestSerializationScope::GlobalSharedRead($key))
     };
+    ($actual_params:ident, managed_account_action) => {
+        Some(match $actual_params.action {
+            v2::ManagedAccountAction::List
+            | v2::ManagedAccountAction::Usage
+            | v2::ManagedAccountAction::Quota
+            | v2::ManagedAccountAction::Resolve
+            | v2::ManagedAccountAction::Models => {
+                ClientRequestSerializationScope::GlobalSharedRead("managed-accounts")
+            }
+            v2::ManagedAccountAction::Add
+            | v2::ManagedAccountAction::Import
+            | v2::ManagedAccountAction::Select
+            | v2::ManagedAccountAction::Remove
+            | v2::ManagedAccountAction::Redeem => {
+                ClientRequestSerializationScope::Global("managed-accounts")
+            }
+        })
+    };
+    ($actual_params:ident, managed_pool_action) => {
+        Some(match $actual_params.action {
+            v2::ManagedPoolAction::List | v2::ManagedPoolAction::Read => {
+                ClientRequestSerializationScope::GlobalSharedRead("managed-accounts")
+            }
+            v2::ManagedPoolAction::Create
+            | v2::ManagedPoolAction::Update
+            | v2::ManagedPoolAction::Select
+            | v2::ManagedPoolAction::Remove => {
+                ClientRequestSerializationScope::Global("managed-accounts")
+            }
+        })
+    };
     ($actual_params:ident, thread_id($params:ident . $field:ident)) => {
         Some(ClientRequestSerializationScope::Thread {
             thread_id: $actual_params.$field.clone(),
@@ -1277,13 +1308,13 @@ client_request_definitions! {
 
     ManagedAccount => "account/manage" {
         params: v2::ManagedAccountParams,
-        serialization: global("managed-accounts"),
+        serialization: managed_account_action,
         response: v2::ManagedAccountResponse,
     },
 
     ManagedPool => "pool/manage" {
         params: v2::ManagedPoolParams,
-        serialization: global("managed-accounts"),
+        serialization: managed_pool_action,
         response: v2::ManagedPoolResponse,
     },
 

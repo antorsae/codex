@@ -2,11 +2,15 @@
 
 ## Locally managed accounts and pools
 
-`account/manage` adds native multi-account operations. Its `action` is one of `add`, `import`, `list`, `select`, `remove`, `usage`, `redeem`, `resolve`, or `models`. `alias` names a stored ChatGPT account; `model` requests model-specific usage. `add` starts existing OAuth or device login (`deviceAuth: true`) and returns a login descriptor. Use `account/login/cancel` and `account/login/completed` for the login lifecycle. Credentials remain on the server.
+`account/manage` adds native multi-account operations. Its `action` is one of `add`, `import`, `list`, `select`, `remove`, `usage`, `quota`, `redeem`, `resolve`, or `models`. `alias` names a stored ChatGPT account; `model` requests model-specific usage. `add` starts existing OAuth or device login (`deviceAuth: true`) and returns a login descriptor. Use `account/login/cancel` and `account/login/completed` for the login lifecycle. Credentials remain on the server.
 
 `pool/manage` accepts `create`, `list`, `read`, `update`, `select`, or `remove`. A `pool` contains `name`, ordered `accounts`, and `redeemWeeklyResets`. Creation enables the combined weekly/short-window policy; `redeemWeeklyResets` controls automatic use of existing banked resets. Selecting with a null account alias or pool name clears the user default. Configuration is server-local and user-only.
 
 Both management operations paginate with `cursor` and `limit` (1–100, default 25), returning `data` and `nextCursor`. Usage returns credential-free observations with nullable availability and reset-credit details. Failed reads do not imply available quota.
+
+`quota` provides lightweight background observations in the same `usage` response field: quota windows, ordinary availability, and the available reset count. It does not query models or individual reset credits, ignores `model`, and returns null `model`, `modelSupported`, and `resets`. Use `usage` for model validation and reset-credit details; recovery continues to make fresh, complete observations.
+
+Read-only account and pool actions can run concurrently; mutations wait for earlier reads and remain serialized. Bulk usage reads query up to 32 accounts concurrently and preserve the page's account order.
 
 `thread/start`, `thread/resume`, and `thread/fork` accept an optional selection:
 
@@ -14,7 +18,7 @@ Both management operations paginate with `cursor` and `limit` (1–100, default 
 {"accountSelection":{"type":"pool","name":"work"}}
 ```
 
-The other selection type is `account`. Explicit selection takes precedence over saved session state and the user default. Each thread owns its selection. An already loaded thread rejects a conflicting selection; unload and resume it to change that selection. `account/manage` with `action: "resolve"` or `"models"`, optional `accountSelection` and `threadId`, resolves bootstrap account/model metadata for that selection without changing the global login.
+The other selection type is `account`. Explicit selection takes precedence over saved session state and the user default. Each thread owns its selection. An already loaded thread rejects a conflicting selection; unload and resume it to change that selection. `account/manage` with `action: "resolve"` or `"models"`, optional `accountSelection` and `threadId`, resolves bootstrap account/model metadata for that selection without changing the global login. With a loaded `threadId` and no `accountSelection` override, it returns that thread's actual managed selection, including no selection, regardless of the current user default.
 
 These actions also return `selectedAccount`, containing the selected alias and authenticated user/workspace identity without credentials, and `selectedPool`, containing the session's pool membership and policy (null for single-account selections). For a loaded `threadId`, these reflect the active thread, including account switches and its original pool membership after user configuration changes. Clients can read `usage` for the member aliases and follow `thread/accountPool/updated` selection notifications to keep displays current. A pool's remaining weekly percentage is the sum of its members' weekly percentages; its next reset is the earliest member reset, including exhausted accounts. Banked resets are not included in that total.
 
