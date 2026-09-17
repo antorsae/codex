@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
 use super::RemoteCompactionV2Output;
 use super::run_remote_compaction_request_v2;
@@ -35,6 +36,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
     compaction_trace: &CompactionTraceContext,
     compaction_metadata: CompactionTurnMetadata,
     analytics_details: &mut CompactionAnalyticsDetails,
+    cancellation: &CancellationToken,
 ) -> CodexResult<RemoteCompactV2Attempt> {
     let turn_context = &step_context.turn;
     let mut history = sess.clone_history().await;
@@ -107,6 +109,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
         client_session,
         &prompt,
         &responses_metadata,
+        cancellation,
     )
     .await;
     trace_attempt.record_result(

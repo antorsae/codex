@@ -531,6 +531,14 @@ async fn prefetch_rate_limits_is_gated_on_chatgpt_auth_provider() {
 
     chat.prefetch_rate_limits();
     assert!(!chat.should_prefetch_rate_limits());
+
+    // A provider that brings its own credentials, such as a proxy keyed by an environment
+    // variable, does not spend the ChatGPT login's quota, so its usage is not polled.
+    chat.requires_openai_auth = true;
+    assert!(chat.should_prefetch_rate_limits());
+    chat.config.model_provider.env_key = Some("PROXY_API_KEY".to_owned());
+    assert!(!chat.should_prefetch_rate_limits());
+    assert_eq!(chat.rate_limit_refresh_interval(), None);
 }
 
 #[tokio::test]

@@ -1,6 +1,7 @@
 use crate::context::GuardianContextMode;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio_util::sync::CancellationToken;
 
 use crate::Prompt;
 use crate::client::ModelClientSession;
@@ -122,6 +123,7 @@ pub(crate) async fn run_inline_auto_compact_task(
     initial_context_injection: InitialContextInjection,
     reason: CompactionReason,
     phase: CompactionPhase,
+    cancellation: &CancellationToken,
 ) -> CodexResult<()> {
     let prompt = turn_context
         .config
@@ -143,6 +145,7 @@ pub(crate) async fn run_inline_auto_compact_task(
         CompactionTrigger::Auto,
         reason,
         phase,
+        cancellation,
     )
     .await?;
     Ok(())
@@ -152,6 +155,7 @@ pub(crate) async fn run_compact_task(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
     input: Vec<UserInput>,
+    cancellation: &CancellationToken,
 ) -> CodexResult<()> {
     let start_event = EventMsg::TurnStarted(TurnStartedEvent {
         turn_id: turn_context.sub_id.clone(),
@@ -169,11 +173,16 @@ pub(crate) async fn run_compact_task(
         CompactionTrigger::Manual,
         CompactionReason::UserRequested,
         CompactionPhase::StandaloneTurn,
+        cancellation,
     )
     .await?;
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Compaction must carry the running turn cancellation token through its existing request boundary"
+)]
 async fn run_compact_task_inner(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
@@ -182,6 +191,7 @@ async fn run_compact_task_inner(
     trigger: CompactionTrigger,
     reason: CompactionReason,
     phase: CompactionPhase,
+    cancellation: &CancellationToken,
 ) -> CodexResult<()> {
     let compaction_metadata =
         CompactionTurnMetadata::new(trigger, reason, CompactionImplementation::Responses, phase);
@@ -216,6 +226,7 @@ async fn run_compact_task_inner(
         input,
         initial_context_injection,
         compaction_metadata,
+        cancellation,
     )
     .await;
     let status = compaction_status_from_result(&result);
@@ -242,6 +253,19 @@ async fn run_compact_task_inner(
             CompactionAnalyticsDetails::default(),
         )
         .await;
+    if let Err(error) = &result
+        && !matches!(
+            error.details(),
+            CodexErrorDetails::Interrupted | CodexErrorDetails::TurnAborted
+        )
+    {
+        sess.track_turn_codex_error(&turn_context, error);
+        sess.send_event(
+            &turn_context,
+            EventMsg::Error(error.to_error_event(/*message_prefix*/ None)),
+        )
+        .await;
+    }
     result.map(|_| ())
 }
 
@@ -251,6 +275,7 @@ async fn run_compact_task_inner_impl(
     input: Vec<UserInput>,
     initial_context_injection: InitialContextInjection,
     compaction_metadata: CompactionTurnMetadata,
+    cancellation: &CancellationToken,
 ) -> CodexResult<String> {
     let compaction_item = TurnItem::ContextCompaction(ContextCompactionItem::new());
     sess.emit_turn_item_started(&turn_context, &compaction_item)
@@ -276,6 +301,14 @@ async fn run_compact_task_inner_impl(
         )
         .await;
 
+    crate::account_pools::before_request(
+        &sess,
+        &turn_context,
+        &turn_context.model_info().slug,
+        &mut client_session,
+        cancellation,
+    )
+    .await?;
     let compaction_response_id = loop {
         // Clone is required because of the loop
         let turn_input = history
@@ -298,6 +331,7 @@ async fn run_compact_task_inner_impl(
 
         match attempt_result {
             Ok(response_id) => {
+                crate::account_pools::record_success(&sess).await;
                 break response_id;
             }
             Err(err)
@@ -309,9 +343,6 @@ async fn run_compact_task_inner_impl(
                 return Err(err);
             }
             Err(e) if matches!(e.details(), CodexErrorDetails::SessionBudgetExceeded) => {
-                sess.track_turn_codex_error(turn_context.as_ref(), &e);
-                let event = EventMsg::Error(e.to_error_event(/*message_prefix*/ None));
-                sess.send_event(&turn_context, event).await;
                 return Err(e);
             }
             Err(e) if matches!(e.details(), CodexErrorDetails::ContextWindowExceeded) => {
@@ -325,10 +356,20 @@ async fn run_compact_task_inner_impl(
                     continue;
                 }
                 sess.set_total_tokens_full(turn_context.as_ref()).await;
-                sess.track_turn_codex_error(turn_context.as_ref(), &e);
-                let event = EventMsg::Error(e.to_error_event(/*message_prefix*/ None));
-                sess.send_event(&turn_context, event).await;
                 return Err(e);
+            }
+            Err(e) if matches!(e.details(), CodexErrorDetails::UsageLimitReached(_)) => {
+                if !crate::account_pools::recover(
+                    &sess,
+                    &turn_context,
+                    &turn_context.model_info().slug,
+                    &mut client_session,
+                    cancellation,
+                )
+                .await?
+                {
+                    return Err(e);
+                }
             }
             Err(e) => {
                 if retries < max_retries {
@@ -343,9 +384,6 @@ async fn run_compact_task_inner_impl(
                     tokio::time::sleep(delay).await;
                     continue;
                 } else {
-                    sess.track_turn_codex_error(turn_context.as_ref(), &e);
-                    let event = EventMsg::Error(e.to_error_event(/*message_prefix*/ None));
-                    sess.send_event(&turn_context, event).await;
                     return Err(e);
                 }
             }

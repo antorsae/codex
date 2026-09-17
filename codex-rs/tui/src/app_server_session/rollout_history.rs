@@ -186,6 +186,7 @@ impl AppServerSession {
         let fork_parent_title = self
             .fork_parent_title_from_app_server(response.thread.forked_from_id.as_deref())
             .await;
+        self.account_thread_id = Some(response.thread.id.clone());
         let mut started = started_thread_from_resume_response(
             response,
             local_settings,

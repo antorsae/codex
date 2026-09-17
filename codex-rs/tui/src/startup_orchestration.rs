@@ -347,6 +347,7 @@ pub(super) async fn run_main_inner(
     let additional_dirs = cli.add_dir.clone();
 
     let mut overrides = ConfigOverrides {
+        account_selection: cli.account_selection(),
         model,
         approval_policy,
         sandbox_mode,
@@ -500,10 +501,20 @@ pub(super) async fn run_main_inner(
         }
     }
 
-    if !app_server_target.uses_remote_workspace() && !workload_identity_selected {
+    if !app_server_target.uses_remote_workspace()
+        && !workload_identity_selected
+        && !(cli.resume_picker
+            || cli.resume_last
+            || cli.resume_session_id.is_some()
+            || cli.fork_picker
+            || cli.fork_last
+            || cli.fork_session_id.is_some())
+    {
         #[allow(clippy::print_stderr)]
         if let Err(err) = startup_draft
-            .run_until(enforce_login_restrictions(&config.auth_config()))
+            .run_until(crate::legacy_core::enforce_account_selection_restrictions(
+                &config, /*resume_id*/ None,
+            ))
             .await?
         {
             restore_terminal_before_fatal_exit();

@@ -1,0 +1,104 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AccountPool": {
+      "properties": {
+        "accounts": {
+          "description": "Ordered aliases. The order breaks quota and reset-credit ties.",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "redeemWeeklyResets": {
+          "description": "Use existing banked credits only when every eligible account is weekly exhausted.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "accounts",
+        "name",
+        "redeemWeeklyResets"
+      ],
+      "type": "object"
+    },
+    "AccountSelection": {
+      "oneOf": [
+        {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "account"
+              ],
+              "title": "AccountAccountSelectionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "type"
+          ],
+          "title": "AccountAccountSelection",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "pool"
+              ],
+              "title": "PoolAccountSelectionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "type"
+          ],
+          "title": "PoolAccountSelection",
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "data": {
+      "items": {
+        "$ref": "#/definitions/AccountPool"
+      },
+      "type": "array"
+    },
+    "defaultSelection": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AccountSelection"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nextCursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "data"
+  ],
+  "title": "ManagedPoolResponse",
+  "type": "object"
+}

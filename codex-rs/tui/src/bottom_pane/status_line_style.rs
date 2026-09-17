@@ -46,7 +46,11 @@ impl StatusLineAccent {
             | StatusLineItem::TotalOutputTokens
             | StatusLineItem::ThreadCredits
             | StatusLineItem::EstimatedThreadCost => Self::Usage,
-            StatusLineItem::FiveHourLimit | StatusLineItem::WeeklyLimit => Self::Limit,
+            StatusLineItem::FiveHourLimit
+            | StatusLineItem::WeeklyLimit
+            | StatusLineItem::AccountWeekly
+            | StatusLineItem::PoolWeekly
+            | StatusLineItem::WeeklyLimitWithReset => Self::Limit,
             StatusLineItem::CodexVersion | StatusLineItem::Hostname | StatusLineItem::SessionId => {
                 Self::Metadata
             }
@@ -57,6 +61,7 @@ impl StatusLineAccent {
             | StatusLineItem::ThreadTitle
             | StatusLineItem::WorkspaceHeadline => Self::Thread,
             StatusLineItem::TaskProgress => Self::Progress,
+            StatusLineItem::AccountEmail => Self::Metadata,
         }
     }
 

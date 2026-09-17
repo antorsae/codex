@@ -1,0 +1,9 @@
+---
+source: tui/src/history_cell/account_pools_tests.rs
+expression: "render(&AccountPoolReport::pools(&response), 90)"
+---
+Pools (0)
+
+Default for new sessions: current login
+
+No pools configured. Create one with /pools create NAME ALIAS...

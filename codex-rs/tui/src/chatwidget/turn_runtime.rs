@@ -74,6 +74,7 @@ impl ChatWidget {
     // Raw reasoning uses the same flow as summarized reasoning
 
     pub(super) fn on_task_started(&mut self) {
+        self.cancel_capacity_retry();
         self.clear_context_compaction();
         self.input_queue.user_turn_pending_start = false;
         self.reset_safety_buffering_for_turn_start();
@@ -412,6 +413,18 @@ impl ChatWidget {
     }
 
     pub(super) fn on_rate_limit_error(&mut self, error_kind: RateLimitErrorKind, message: String) {
+        if self.thread_usage.replaying_turn_completion {
+            // Historical failures are transcript content, not a new quota-recovery request.
+            self.add_to_history(history_cell::new_error_event(message));
+            return;
+        }
+        if self.managed_accounts_active {
+            // The pool coordinator owns live recovery. No legacy usage read will release a
+            // TUI submission hold for a managed account.
+            self.input_queue.rate_limit_recovery_pending = false;
+            self.on_error(message);
+            return;
+        }
         self.invalidate_ordinary_usage_recovery();
         // on_error can drain queued input, before the asynchronous recovery read completes.
         self.input_queue.rate_limit_recovery_pending = self.has_chatgpt_account;
@@ -471,6 +484,9 @@ impl ChatWidget {
         message: String,
         codex_error_info: Option<AppServerCodexErrorInfo>,
     ) {
+        if codex_error_info != Some(AppServerCodexErrorInfo::ServerOverloaded) {
+            self.capacity_retry.reset();
+        }
         if codex_error_info == Some(AppServerCodexErrorInfo::MisalignmentPolicyViolation) {
             self.on_misalignment_policy_violation();
         } else if codex_error_info

@@ -4,6 +4,7 @@ use super::*;
 
 impl ChatWidget {
     pub(crate) fn pause_for_disconnect(&mut self) {
+        self.capacity_retry.reset();
         if let Some(questions) = &mut self.bottom_pane.questions {
             questions.delivery_enabled = false;
         }

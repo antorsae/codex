@@ -1,0 +1,16 @@
+---
+source: tui/src/history_cell/account_pools_tests.rs
+expression: "render(&AccountPoolReport::pools(&response), 90)"
+---
+Pools (2)
+
+Default for new sessions: pool work
+
+ Name        Accounts (in order)    Automatic weekly resets
+━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━
+ work        acct2, acct1           Enabled
+──────────  ─────────────────────  ─────────────────────────
+ personal    acct1                  Disabled
+
+Use /accounts for quota by account and /pools select NAME to set the default for new
+sessions.

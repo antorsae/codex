@@ -230,12 +230,16 @@ fn next_goal_draft(
     }
 }
 
+#[path = "tests/account_pools_tests.rs"]
+mod account_pools;
 mod app_server;
 mod approval_requests;
 #[path = "tests/backend_banners_tests.rs"]
 mod backend_banners_tests;
 #[path = "tests/bedrock_catalog_tests.rs"]
 mod bedrock_catalog_tests;
+#[path = "capacity_retry_tests.rs"]
+mod capacity_retry;
 #[path = "tests/collaboration_catalog_tests.rs"]
 mod collaboration_catalog_tests;
 #[path = "tests/compaction_tests.rs"]

@@ -10,6 +10,7 @@ impl ChatWidget {
         fork_parent_title: Option<String>,
     ) {
         self.invalidate_permission_discovery();
+        self.capacity_retry = capacity_retry::CapacityRetryState::default();
         self.permission_profiles_menu_opened = false;
         self.transcript.reset_copy_history();
         let history_metadata = session.message_history.unwrap_or_default();

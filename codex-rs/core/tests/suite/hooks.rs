@@ -1801,6 +1801,12 @@ async fn async_hook_finishing_while_idle_waits_for_the_next_turn(
         "an async hook result from the previous turn must not start a model turn"
     );
 
+    // Keep the next prompt's hook pending while asserting delivery of the previous
+    // hook. Otherwise it can inject another context item and consume a third response.
+    fs::remove_file(
+        test.codex_home_path()
+            .join("async_user_prompt_submit_release"),
+    )?;
     let next_prompt = "observe the buffered async context";
     let next_turn = if automatic_continuation {
         TurnInputRequest::new(TurnInput::ResponseItem(responses::user_message_item(
@@ -1838,6 +1844,11 @@ async fn async_hook_finishing_while_idle_waits_for_the_next_turn(
     })
     .await
     .context("timed out waiting for the next turn to complete")??;
+    fs::write(
+        test.codex_home_path()
+            .join("async_user_prompt_submit_release"),
+        "ready",
+    )?;
 
     let requests = responses.requests();
     assert_eq!(requests.len(), 2);

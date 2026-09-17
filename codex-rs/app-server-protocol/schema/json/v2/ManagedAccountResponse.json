@@ -1,0 +1,778 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "Account": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "apiKey"
+              ],
+              "title": "ApiKeyAccountType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "ApiKeyAccount",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "email": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "planType": {
+              "$ref": "#/definitions/PlanType"
+            },
+            "type": {
+              "enum": [
+                "chatgpt"
+              ],
+              "title": "ChatgptAccountType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "email",
+            "planType",
+            "type"
+          ],
+          "title": "ChatgptAccount",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "amazonBedrock"
+              ],
+              "title": "AmazonBedrockAccountType",
+              "type": "string"
+            },
+            "usesCodexManagedCredentials": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "AmazonBedrockAccount",
+          "type": "object"
+        }
+      ]
+    },
+    "AccountPool": {
+      "properties": {
+        "accounts": {
+          "description": "Ordered aliases. The order breaks quota and reset-credit ties.",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "redeemWeeklyResets": {
+          "description": "Use existing banked credits only when every eligible account is weekly exhausted.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "accounts",
+        "name",
+        "redeemWeeklyResets"
+      ],
+      "type": "object"
+    },
+    "AccountQuotaWindow": {
+      "properties": {
+        "limitId": {
+          "type": "string"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "remainingPercent": {
+          "format": "double",
+          "type": "number"
+        },
+        "resetsAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "windowMinutes": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "limitId",
+        "remainingPercent",
+        "windowMinutes"
+      ],
+      "type": "object"
+    },
+    "AccountSelection": {
+      "oneOf": [
+        {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "account"
+              ],
+              "title": "AccountAccountSelectionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "type"
+          ],
+          "title": "AccountAccountSelection",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "pool"
+              ],
+              "title": "PoolAccountSelectionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "type"
+          ],
+          "title": "PoolAccountSelection",
+          "type": "object"
+        }
+      ]
+    },
+    "BankedReset": {
+      "properties": {
+        "expiresAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "InputModality": {
+      "description": "Canonical user-input modality tags advertised by a model.",
+      "oneOf": [
+        {
+          "description": "Plain text turns and tool payloads.",
+          "enum": [
+            "text"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Image attachments included in user turns.",
+          "enum": [
+            "image"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Audio attachments included in user turns.",
+          "enum": [
+            "audio"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "ManagedAccount": {
+      "properties": {
+        "alias": {
+          "type": "string"
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "plan": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "userId": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "alias",
+        "userId",
+        "workspaceId"
+      ],
+      "type": "object"
+    },
+    "ManagedAccountUsage": {
+      "properties": {
+        "account": {
+          "$ref": "#/definitions/ManagedAccount"
+        },
+        "availableResets": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "checkedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "modelSupported": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "ordinaryUsageAllowed": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "pools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "resets": {
+          "description": "Null means details are unknown, including failed reads.",
+          "items": {
+            "$ref": "#/definitions/BankedReset"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "windows": {
+          "items": {
+            "$ref": "#/definitions/AccountQuotaWindow"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "account",
+        "checkedAt",
+        "pools",
+        "windows"
+      ],
+      "type": "object"
+    },
+    "Model": {
+      "properties": {
+        "additionalSpeedTiers": {
+          "default": [],
+          "description": "Deprecated: use `serviceTiers` instead.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "availabilityNux": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ModelAvailabilityNux"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "defaultReasoningEffort": {
+          "$ref": "#/definitions/ReasoningEffort"
+        },
+        "defaultServiceTier": {
+          "default": null,
+          "description": "Catalog default service tier id for this model, when one is configured.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "inputModalities": {
+          "default": [
+            "text",
+            "image"
+          ],
+          "items": {
+            "$ref": "#/definitions/InputModality"
+          },
+          "type": "array"
+        },
+        "isDefault": {
+          "type": "boolean"
+        },
+        "model": {
+          "type": "string"
+        },
+        "modelSpecialty": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "multiAgentVersion": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MultiAgentVersion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Multi-agent runtime declared by this model, when available."
+        },
+        "serviceTiers": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ModelServiceTier"
+          },
+          "type": "array"
+        },
+        "supportedReasoningEfforts": {
+          "items": {
+            "$ref": "#/definitions/ReasoningEffortOption"
+          },
+          "type": "array"
+        },
+        "supportsPersonality": {
+          "default": false,
+          "type": "boolean"
+        },
+        "upgrade": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "upgradeInfo": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ModelUpgradeInfo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "defaultReasoningEffort",
+        "description",
+        "displayName",
+        "hidden",
+        "id",
+        "isDefault",
+        "model",
+        "supportedReasoningEfforts"
+      ],
+      "type": "object"
+    },
+    "ModelAvailabilityNux": {
+      "properties": {
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "type": "object"
+    },
+    "ModelServiceTier": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "description",
+        "id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "ModelUpgradeInfo": {
+      "properties": {
+        "migrationMarkdown": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "modelLink": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retirementAt": {
+          "description": "Informational Unix timestamp for this upgrade's scheduled retirement, if known.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "upgradeCopy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "type": "object"
+    },
+    "MultiAgentVersion": {
+      "description": "Multi-agent runtime supported by a model.",
+      "enum": [
+        "disabled",
+        "v1",
+        "v2"
+      ],
+      "type": "string"
+    },
+    "PlanType": {
+      "enum": [
+        "free",
+        "go",
+        "plus",
+        "pro",
+        "prolite",
+        "team",
+        "self_serve_business_prolite",
+        "self_serve_business_usage_based",
+        "business",
+        "ent26",
+        "enterprise_cbp_automation",
+        "enterprise_cbp_usage_based",
+        "enterprise",
+        "edu",
+        "edu_plus",
+        "edu_pro",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "ReasoningEffort": {
+      "description": "A non-empty reasoning effort value advertised by the model.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "ReasoningEffortOption": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "reasoningEffort": {
+          "$ref": "#/definitions/ReasoningEffort"
+        }
+      },
+      "required": [
+        "description",
+        "reasoningEffort"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "data": {
+      "items": {
+        "$ref": "#/definitions/ManagedAccount"
+      },
+      "type": "array"
+    },
+    "defaultSelection": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AccountSelection"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "login": {
+      "anyOf": [
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "type": {
+                  "enum": [
+                    "apiKey"
+                  ],
+                  "title": "ApiKeyv2::ManagedAccountResponseType",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "title": "ApiKeyv2::ManagedAccountResponse",
+              "type": "object"
+            },
+            {
+              "properties": {
+                "authUrl": {
+                  "description": "URL the client should open in a browser to initiate the OAuth flow.",
+                  "type": "string"
+                },
+                "loginId": {
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "chatgpt"
+                  ],
+                  "title": "Chatgptv2::ManagedAccountResponseType",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "authUrl",
+                "loginId",
+                "type"
+              ],
+              "title": "Chatgptv2::ManagedAccountResponse",
+              "type": "object"
+            },
+            {
+              "properties": {
+                "loginId": {
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "chatgptDeviceCode"
+                  ],
+                  "title": "ChatgptDeviceCodev2::ManagedAccountResponseType",
+                  "type": "string"
+                },
+                "userCode": {
+                  "description": "One-time code the user must enter after signing in.",
+                  "type": "string"
+                },
+                "verificationUrl": {
+                  "description": "URL the client should open in a browser to complete device code authorization.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "loginId",
+                "type",
+                "userCode",
+                "verificationUrl"
+              ],
+              "title": "ChatgptDeviceCodev2::ManagedAccountResponse",
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "enum": [
+                    "chatgptAuthTokens"
+                  ],
+                  "title": "ChatgptAuthTokensv2::ManagedAccountResponseType",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "title": "ChatgptAuthTokensv2::ManagedAccountResponse",
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "enum": [
+                    "amazonBedrock"
+                  ],
+                  "title": "AmazonBedrockv2::ManagedAccountResponseType",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "title": "AmazonBedrockv2::ManagedAccountResponse",
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "models": {
+      "items": {
+        "$ref": "#/definitions/Model"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "nextCursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "resolved": {
+      "anyOf": [
+        {
+          "properties": {
+            "account": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Account"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "requiresOpenaiAuth": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "requiresOpenaiAuth"
+          ],
+          "title": "RequiresOpenaiAuthv2::ManagedAccountResponse",
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Null means this selection uses legacy authentication."
+    },
+    "selectedAccount": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ManagedAccount"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Identity selected by `resolve` or `models`, without credentials."
+    },
+    "selectedPool": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AccountPool"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Session pool membership and policy for `resolve` or `models`; null for single accounts."
+    },
+    "usage": {
+      "items": {
+        "$ref": "#/definitions/ManagedAccountUsage"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "data",
+    "login",
+    "resolved",
+    "usage"
+  ],
+  "title": "ManagedAccountResponse",
+  "type": "object"
+}

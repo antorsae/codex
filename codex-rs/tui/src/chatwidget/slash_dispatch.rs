@@ -54,7 +54,7 @@ impl ChatWidget {
     }
 
     pub(super) fn handle_service_tier_command_dispatch(&mut self, command: ServiceTierCommand) {
-        self.transcript.last_status_copy_targets = None;
+        self.transcript.last_command_copy_source = None;
         if self.active_side_conversation {
             self.add_error_message(format!(
                 "'/{}' is unavailable in side conversations. {SIDE_SLASH_COMMAND_UNAVAILABLE_HINT}",
@@ -148,7 +148,7 @@ impl ChatWidget {
 
     pub(super) fn dispatch_command(&mut self, cmd: SlashCommand) {
         if cmd != SlashCommand::Copy {
-            self.transcript.last_status_copy_targets = None;
+            self.transcript.last_command_copy_source = None;
         }
         if !self.ensure_slash_command_allowed_in_side_conversation(cmd) {
             return;
@@ -506,6 +506,18 @@ impl ChatWidget {
                     self.open_usage_menu();
                 }
             }
+            SlashCommand::Accounts => {
+                self.add_account_pool_command(cmd, "");
+                self.app_event_tx.send(AppEvent::ManagedAccounts {
+                    args: String::new(),
+                });
+            }
+            SlashCommand::Pools => {
+                self.add_account_pool_command(cmd, "");
+                self.app_event_tx.send(AppEvent::ManagedPools {
+                    args: String::new(),
+                });
+            }
             SlashCommand::Ide => {
                 self.handle_ide_command();
             }
@@ -604,7 +616,7 @@ impl ChatWidget {
         text_elements: Vec<TextElement>,
     ) {
         if cmd != SlashCommand::Copy {
-            self.transcript.last_status_copy_targets = None;
+            self.transcript.last_command_copy_source = None;
         }
         if !self.ensure_slash_command_allowed_in_side_conversation(cmd) {
             return;
@@ -721,7 +733,7 @@ impl ChatWidget {
         prepared: PreparedSlashCommandArgs,
     ) {
         if cmd != SlashCommand::Copy {
-            self.transcript.last_status_copy_targets = None;
+            self.transcript.last_command_copy_source = None;
         }
         let PreparedSlashCommandArgs {
             args,
@@ -756,6 +768,14 @@ impl ChatWidget {
                         ),
                     }
                 }
+            }
+            SlashCommand::Accounts => {
+                self.add_account_pool_command(cmd, &args);
+                self.app_event_tx.send(AppEvent::ManagedAccounts { args });
+            }
+            SlashCommand::Pools => {
+                self.add_account_pool_command(cmd, &args);
+                self.app_event_tx.send(AppEvent::ManagedPools { args });
             }
             SlashCommand::Ide => {
                 self.handle_ide_command_args(trimmed);
@@ -1152,7 +1172,7 @@ impl ChatWidget {
     }
 
     fn ensure_usage_command_available(&mut self) -> bool {
-        if self.has_codex_backend_auth {
+        if self.has_codex_backend_auth || self.managed_accounts_active {
             return true;
         }
         self.add_error_message(USAGE_CHATGPT_LOGIN_REQUIRED.to_string());
@@ -1168,6 +1188,8 @@ impl ChatWidget {
             | SlashCommand::Status
             | SlashCommand::Pwd
             | SlashCommand::Usage
+            | SlashCommand::Accounts
+            | SlashCommand::Pools
             | SlashCommand::DebugConfig
             | SlashCommand::Ps
             | SlashCommand::Stop

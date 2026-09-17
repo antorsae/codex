@@ -1,0 +1,9 @@
+---
+source: tui/src/chatwidget/tests/account_pools_tests.rs
+expression: "render_bottom_popup(&chat, 80)"
+---
+  Copy to clipboard
+
+› 1. Whole report  **Pools (0)**
+
+  Press enter to confirm or esc to go back

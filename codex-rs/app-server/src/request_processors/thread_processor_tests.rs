@@ -659,6 +659,7 @@ mod thread_processor_behavior_tests {
     fn collect_resume_override_mismatches_includes_service_tier() {
         let cwd = test_path_buf("/tmp").abs();
         let request = ThreadResumeParams {
+            account_selection: None,
             thread_id: "thread-1".to_string(),
             history: None,
             path: None,
@@ -762,6 +763,8 @@ mod thread_processor_behavior_tests {
             &mut request_overrides,
             &mut typesafe_overrides,
             &persisted_metadata,
+            "openai",
+            &HashMap::new(),
         );
 
         assert_eq!(
@@ -783,6 +786,55 @@ mod thread_processor_behavior_tests {
     }
 
     #[test]
+    fn merge_persisted_resume_metadata_lets_a_configured_openai_route_replace_the_persisted_one()
+    -> Result<()> {
+        let mut providers = codex_model_provider_info::built_in_model_providers(None);
+        let openai = providers["openai"].clone();
+        let mut proxy = openai.clone();
+        proxy.env_key = Some("PROXY_API_KEY".to_string());
+        providers.insert("proxy".to_string(), proxy);
+        let mut other = openai;
+        other.name = "Other".to_string();
+        providers.insert("other".to_string(), other);
+        let mut persisted_metadata =
+            test_thread_metadata(Some("gpt-5.1-codex-max"), /*reasoning_effort*/ None)?;
+        persisted_metadata.model_provider = "openai".to_string();
+
+        // A proxy that mirrors OpenAI replaces the persisted built-in provider.
+        let mut typesafe_overrides = ConfigOverrides::default();
+        merge_persisted_resume_metadata(
+            &mut None,
+            &mut typesafe_overrides,
+            &persisted_metadata,
+            "proxy",
+            &providers,
+        );
+        assert_eq!(typesafe_overrides.model_provider, None);
+        assert_eq!(
+            typesafe_overrides.model,
+            Some("gpt-5.1-codex-max".to_string())
+        );
+
+        // The same provider, or one that is not an OpenAI route, keeps the persisted choice.
+        for configured in ["openai", "other", "unknown"] {
+            let mut typesafe_overrides = ConfigOverrides::default();
+            merge_persisted_resume_metadata(
+                &mut None,
+                &mut typesafe_overrides,
+                &persisted_metadata,
+                configured,
+                &providers,
+            );
+            assert_eq!(
+                typesafe_overrides.model_provider,
+                Some("openai".to_string()),
+                "configured {configured}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn merge_persisted_resume_metadata_preserves_explicit_overrides() -> Result<()> {
         let mut request_overrides = Some(HashMap::from([(
             "model_reasoning_effort".to_string(),
@@ -799,6 +851,8 @@ mod thread_processor_behavior_tests {
             &mut request_overrides,
             &mut typesafe_overrides,
             &persisted_metadata,
+            "openai",
+            &HashMap::new(),
         );
 
         assert_eq!(typesafe_overrides.model, Some("gpt-5.2-codex".to_string()));
@@ -828,6 +882,8 @@ mod thread_processor_behavior_tests {
             &mut request_overrides,
             &mut typesafe_overrides,
             &persisted_metadata,
+            "openai",
+            &HashMap::new(),
         );
 
         assert_eq!(typesafe_overrides.model, None);
@@ -857,6 +913,8 @@ mod thread_processor_behavior_tests {
             &mut request_overrides,
             &mut typesafe_overrides,
             &persisted_metadata,
+            "openai",
+            &HashMap::new(),
         );
 
         assert_eq!(typesafe_overrides.model, None);
@@ -880,6 +938,8 @@ mod thread_processor_behavior_tests {
             &mut request_overrides,
             &mut typesafe_overrides,
             &persisted_metadata,
+            "openai",
+            &HashMap::new(),
         );
 
         assert_eq!(typesafe_overrides.model, None);
@@ -905,6 +965,8 @@ mod thread_processor_behavior_tests {
             &mut request_overrides,
             &mut typesafe_overrides,
             &persisted_metadata,
+            "openai",
+            &HashMap::new(),
         );
 
         assert_eq!(typesafe_overrides.model, None);

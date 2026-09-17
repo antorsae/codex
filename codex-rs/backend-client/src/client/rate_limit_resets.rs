@@ -20,6 +20,27 @@ struct ConsumeRateLimitResetCreditRequest<'a> {
 }
 
 impl Client {
+    /// Read the authenticated model catalog without falling back to bundled metadata.
+    pub async fn get_account_model_slugs(&self) -> Result<Vec<String>> {
+        #[derive(serde::Deserialize)]
+        struct Catalog {
+            models: Vec<Model>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Model {
+            slug: String,
+        }
+        let base = match self.path_style {
+            PathStyle::ChatGptApi => format!("{}/codex/models", self.base_url),
+            PathStyle::CodexApi => format!("{}/api/codex/models", self.base_url),
+        };
+        let url = format!("{base}?client_version={}", env!("CARGO_PKG_VERSION"));
+        let req = self.request(Method::GET, &url).headers(self.headers());
+        let (body, ct) = self.exec_request_detailed(req, "GET", &url).await?;
+        let catalog: Catalog = self.decode_json(&url, &ct, &body)?;
+        Ok(catalog.models.into_iter().map(|model| model.slug).collect())
+    }
+
     pub async fn get_rate_limits_with_reset_credits(&self) -> Result<RateLimitsWithResetCredits> {
         self.get_rate_limits_for_usage(/*supports_luna_reserve*/ false)
             .await
@@ -75,14 +96,14 @@ impl Client {
         if supports_luna_reserve {
             req = req.header("x-openai-codex-luna-reserve", HeaderValue::from_static("1"));
         }
-        let (body, ct) = self.exec_request(req, "GET", &url).await?;
+        let (body, ct) = self.exec_request_detailed(req, "GET", &url).await?;
         self.decode_json(&url, &ct, &body)
     }
 
     pub async fn list_rate_limit_reset_credits(&self) -> Result<RateLimitResetCreditsDetails> {
         let url = self.rate_limit_reset_credits_url();
         let req = self.request(Method::GET, &url).headers(self.headers());
-        let (body, ct) = self.exec_request(req, "GET", &url).await?;
+        let (body, ct) = self.exec_request_detailed(req, "GET", &url).await?;
         self.decode_json(&url, &ct, &body)
     }
 

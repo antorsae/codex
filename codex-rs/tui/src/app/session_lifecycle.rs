@@ -495,6 +495,8 @@ impl App {
             chat_widget.last_terminal_title = previous_terminal_title;
         }
         chat_widget.remote_connection = self.chat_widget.remote_connection.clone();
+        // A replacement widget must not re-arm the legacy periodic usage poll for a pooled session.
+        chat_widget.managed_accounts_active |= self.chat_widget.managed_accounts_active;
         chat_widget.set_local_worktree_operations(self.chat_widget.local_worktree_operations);
         chat_widget.set_agents_navigation_enabled(matches!(
             self.app_server_target,
@@ -896,6 +898,8 @@ impl App {
             &self.cli_kv_overrides,
             &self.harness_overrides,
         );
+        config.account_selection_source_thread_id =
+            self.chat_widget.thread_id().map(|id| id.to_string());
         let summary = session_summary(
             self.chat_widget.token_usage(),
             self.chat_widget.thread_id(),
@@ -921,6 +925,7 @@ impl App {
                         tracing::warn!("failed to unsubscribe tracked thread {thread_id}: {err}");
                     }
                 }
+                config.account_selection_source_thread_id = None;
                 self.local_settings = crate::local_settings::LocalSettings::from(&config);
                 self.config = config;
 

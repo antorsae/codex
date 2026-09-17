@@ -5,6 +5,50 @@
       "description": "A path that is guaranteed to be absolute and normalized (though it is not guaranteed to be canonicalized or exist on the filesystem).\n\nIMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.",
       "type": "string"
     },
+    "AccountSelection": {
+      "oneOf": [
+        {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "account"
+              ],
+              "title": "AccountAccountSelectionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "type"
+          ],
+          "title": "AccountAccountSelection",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "pool"
+              ],
+              "title": "PoolAccountSelectionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "type"
+          ],
+          "title": "PoolAccountSelection",
+          "type": "object"
+        }
+      ]
+    },
     "ApprovalsReviewer": {
       "description": "Configures who approval requests are routed to for review. Examples include sandbox escapes, blocked network access, MCP approval prompts, and ARC escalations. Defaults to `user`. `auto_review` uses a carefully prompted subagent to gather relevant context and apply a risk-based decision framework before approving or denying the request. The legacy value `guardian_subagent` is accepted for compatibility.",
       "enum": [
@@ -301,6 +345,24 @@
     }
   },
   "properties": {
+    "accountSelection": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AccountSelection"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Session-local selection of a server-managed ChatGPT account or pool."
+    },
+    "accountSelectionSourceThreadId": {
+      "description": "Inherit the managed account and pool from an existing conversation. An explicit `accountSelection` takes precedence. This does not copy conversation history.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "approvalPolicy": {
       "anyOf": [
         {

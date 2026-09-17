@@ -1,4 +1,5 @@
 // Aggregates all former standalone integration tests as modules.
+mod account_pools;
 mod add_dir;
 mod agents_md;
 mod apply_patch;

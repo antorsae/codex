@@ -1,4 +1,7 @@
 mod account;
+#[path = "account_pool_concurrency_tests.rs"]
+mod account_pool_concurrency;
+mod account_pools;
 mod account_thread_usage;
 mod analytics;
 mod app_installed;

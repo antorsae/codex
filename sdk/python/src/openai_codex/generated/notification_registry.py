@@ -47,6 +47,7 @@ from .v2_all import RemoteControlStatusChangedNotification
 from .v2_all import ServerRequestResolvedNotification
 from .v2_all import SkillsChangedNotification
 from .v2_all import TerminalInteractionNotification
+from .v2_all import ThreadAccountPoolNotification
 from .v2_all import ThreadArchivedNotification
 from .v2_all import ThreadClosedNotification
 from .v2_all import ThreadDeletedNotification
@@ -116,6 +117,7 @@ NOTIFICATION_MODELS: dict[str, type[BaseModel]] = {
     "remoteControl/status/changed": RemoteControlStatusChangedNotification,
     "serverRequest/resolved": ServerRequestResolvedNotification,
     "skills/changed": SkillsChangedNotification,
+    "thread/accountPool/updated": ThreadAccountPoolNotification,
     "thread/archived": ThreadArchivedNotification,
     "thread/closed": ThreadClosedNotification,
     "thread/compacted": ContextCompactedNotification,

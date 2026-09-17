@@ -432,6 +432,15 @@ impl EventProcessorWithJsonOutput {
                 }));
                 CodexStatus::Running
             }
+            ServerNotification::ThreadAccountPool(notification) => {
+                events.push(ThreadEvent::AccountPool(
+                    crate::exec_events::AccountPoolUpdate {
+                        thread_id: notification.thread_id,
+                        event: notification.event,
+                    },
+                ));
+                CodexStatus::Running
+            }
             ServerNotification::Warning(notification) => {
                 let warning = self.collect_warning(notification.message);
                 events.extend(warning.events);

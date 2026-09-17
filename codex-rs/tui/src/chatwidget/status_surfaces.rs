@@ -762,6 +762,23 @@ impl ChatWidget {
                 let label = limit_label_for_window(window.window_minutes, is_secondary);
                 self.status_line_limit_display(Some(window), &label)
             }
+            StatusLineItem::WeeklyLimitWithReset => {
+                self.account_status.weekly_display(Local::now().timestamp())
+            }
+            StatusLineItem::AccountWeekly => self
+                .account_status
+                .account_display(Local::now().timestamp()),
+            StatusLineItem::PoolWeekly => {
+                self.account_status.pool_display(Local::now().timestamp())
+            }
+            StatusLineItem::AccountEmail => match &self.status_account_display {
+                Some(StatusAccountDisplay::ChatGpt { email, .. }) => email
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|email| !email.is_empty())
+                    .map(|email| history_cell::sanitize_user_text(email.into()).into_owned()),
+                Some(StatusAccountDisplay::ApiKey) | None => None,
+            },
             StatusLineItem::CodexVersion => Some(CODEX_CLI_VERSION.to_string()),
             StatusLineItem::ContextWindowSize => self
                 .status_line_context_window_size()
@@ -848,6 +865,10 @@ impl ChatWidget {
             StatusSurfacePreviewItem::ContextUsed => StatusLineItem::ContextUsed,
             StatusSurfacePreviewItem::FiveHourLimit => StatusLineItem::FiveHourLimit,
             StatusSurfacePreviewItem::WeeklyLimit => StatusLineItem::WeeklyLimit,
+            StatusSurfacePreviewItem::WeeklyLimitWithReset => StatusLineItem::WeeklyLimitWithReset,
+            StatusSurfacePreviewItem::AccountEmail => StatusLineItem::AccountEmail,
+            StatusSurfacePreviewItem::AccountWeekly => StatusLineItem::AccountWeekly,
+            StatusSurfacePreviewItem::PoolWeekly => StatusLineItem::PoolWeekly,
             StatusSurfacePreviewItem::CodexVersion => StatusLineItem::CodexVersion,
             StatusSurfacePreviewItem::ContextWindowSize => StatusLineItem::ContextWindowSize,
             StatusSurfacePreviewItem::UsedTokens => StatusLineItem::UsedTokens,
