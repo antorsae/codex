@@ -323,6 +323,80 @@ async fn account_pool_defaults_preserve_other_auth_and_explicit_selection_wins()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn account_pool_saved_selection_is_inert_for_providers_with_their_own_credentials()
+-> Result<()> {
+    use codex_account_pools::AccountStore;
+    use codex_login::CodexAuth;
+    use core_test_support::responses;
+    let backend = MockServer::start().await;
+    let home = Arc::new(TempDir::new()?);
+    account_pools::setup(&home, &backend).await?;
+    account_pools::mount_initial_available_usage(&backend).await;
+    let requests = responses::mount_sse_sequence(
+        &backend,
+        vec![responses::sse(vec![responses::ev_completed("done")]); 2],
+    )
+    .await;
+    let url = backend.uri();
+    let pooled = test_codex()
+        .with_home(home.clone())
+        .with_config(move |config| {
+            config.chatgpt_base_url = url;
+            config.cli_auth_credentials_store_mode = AuthCredentialsStoreMode::File;
+            config.account_selection = Some(AccountSelection::Pool("work".to_owned()));
+        })
+        .build_with_auto_env(&backend)
+        .await?;
+    pooled.submit_turn("Run on the pool.").await?;
+    let path = pooled.codex.rollout_path().unwrap();
+    pooled.codex.shutdown_and_wait().await?;
+    let mut config = core_test_support::load_default_config_for_test(&home).await;
+    config.cli_auth_credentials_store_mode = AuthCredentialsStoreMode::File;
+    AccountStore::from_config(&config)
+        .select_default(Some(AccountSelection::Pool("work".to_owned())))
+        .await?;
+    let reads_before = backend
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|request| request.url.path() == "/api/codex/usage")
+        .count();
+
+    // The same thread resumed through a provider that carries its own credentials, like a proxy,
+    // must neither fail nor route through the pool.
+    let url = backend.uri();
+    let resumed = test_codex()
+        .with_auth(CodexAuth::from_api_key("legacy-key"))
+        .with_config(move |config| {
+            config.chatgpt_base_url = url;
+            config.cli_auth_credentials_store_mode = AuthCredentialsStoreMode::File;
+            config.model_provider.experimental_bearer_token = Some("proxy-token".into());
+        })
+        .resume(&backend, home.clone(), path.clone())
+        .await?;
+    resumed.submit_turn("Continue through the proxy.").await?;
+    let request = requests.requests().last().cloned().unwrap();
+    assert_eq!(request.header("chatgpt-account-id"), None);
+    assert_eq!(
+        request.header("authorization").as_deref(),
+        Some("Bearer proxy-token")
+    );
+    assert_eq!(
+        backend
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|request| request.url.path() == "/api/codex/usage")
+            .count(),
+        reads_before
+    );
+    resumed.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn account_pool_resume_precedence_uses_saved_auth_before_legacy_or_default() -> Result<()> {
     use codex_account_pools::AccountStore;
     use codex_login::CodexAuth;

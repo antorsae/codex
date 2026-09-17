@@ -98,6 +98,7 @@ pub async fn initialize(
         .map(|id| PoolSession::saved_selection(&store, id))
         .transpose()?
         .flatten();
+    let explicit = config.account_selection.is_some();
     let selection = config.account_selection.clone().or(saved);
     // Explicit and saved selections take precedence over legacy authentication.
     let compatible = config.model_provider.is_openai()
@@ -107,9 +108,18 @@ pub async fn initialize(
                 .auth_cached()
                 .is_none_or(|auth| matches!(auth, codex_login::CodexAuth::Chatgpt(_))));
     if !compatible {
-        if selection.is_some() {
+        if explicit {
             anyhow::bail!(
                 "Named accounts require locally managed ChatGPT authentication with the OpenAI provider"
+            );
+        }
+        if selection.is_some() {
+            // A thread that once ran on a pool can be resumed or continued with a provider that
+            // brings its own credentials, such as a proxy; the pool stays inert until the
+            // provider changes back rather than failing the session.
+            tracing::info!(
+                provider = %config.model_provider_id,
+                "Ignoring the saved account selection: the model provider does not use locally managed ChatGPT authentication"
             );
         }
         return Ok(None);

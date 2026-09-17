@@ -220,17 +220,43 @@ fn collect_resume_override_mismatches(
     mismatch_details
 }
 
+/// Whether a resumed thread keeps the provider persisted with it. Two providers that both
+/// target OpenAI's API, such as the built-in one and a proxy that mirrors it, are
+/// interchangeable for a thread's history, so the configured one wins: changing
+/// `model_provider` in the configuration moves resumed threads along with new ones.
+fn persisted_provider_applies(
+    persisted: &str,
+    configured: &str,
+    providers: &HashMap<String, codex_model_provider_info::ModelProviderInfo>,
+) -> bool {
+    persisted == configured
+        || !(providers
+            .get(persisted)
+            .is_some_and(codex_model_provider_info::ModelProviderInfo::is_openai)
+            && providers
+                .get(configured)
+                .is_some_and(codex_model_provider_info::ModelProviderInfo::is_openai))
+}
+
 fn merge_persisted_resume_metadata(
     request_overrides: &mut Option<HashMap<String, serde_json::Value>>,
     typesafe_overrides: &mut ConfigOverrides,
     persisted_metadata: &ThreadMetadata,
+    configured_provider: &str,
+    providers: &HashMap<String, codex_model_provider_info::ModelProviderInfo>,
 ) {
     if has_model_resume_override(request_overrides.as_ref(), typesafe_overrides) {
         return;
     }
 
     typesafe_overrides.model = persisted_metadata.model.clone();
-    typesafe_overrides.model_provider = Some(persisted_metadata.model_provider.clone());
+    if persisted_provider_applies(
+        &persisted_metadata.model_provider,
+        configured_provider,
+        providers,
+    ) {
+        typesafe_overrides.model_provider = Some(persisted_metadata.model_provider.clone());
+    }
 
     if let Some(reasoning_effort) = persisted_metadata.reasoning_effort.as_ref() {
         request_overrides.get_or_insert_with(HashMap::new).insert(
@@ -4168,7 +4194,13 @@ impl ThreadRequestProcessor {
             .await
             .ok()
             .flatten()?;
-        merge_persisted_resume_metadata(request_overrides, typesafe_overrides, &persisted_metadata);
+        merge_persisted_resume_metadata(
+            request_overrides,
+            typesafe_overrides,
+            &persisted_metadata,
+            &self.config.model_provider_id,
+            &self.config.model_providers,
+        );
         Some(persisted_metadata)
     }
 

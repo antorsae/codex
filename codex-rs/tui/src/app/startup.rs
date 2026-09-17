@@ -892,7 +892,8 @@ See the Codex keymap documentation for supported actions and examples."
         // Kick off a non-blocking rate-limit prefetch so the first `/status`
         // already has data and available reset credits can be surfaced, without
         // delaying the initial frame render.
-        if requires_openai_auth && has_chatgpt_account && !app.chat_widget.managed_accounts_active {
+        if app.chat_widget.should_prefetch_rate_limits() && !app.chat_widget.managed_accounts_active
+        {
             crate::daybreak::prefetch_notice(
                 &app.config,
                 &app_server,

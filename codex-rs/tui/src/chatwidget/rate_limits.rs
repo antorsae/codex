@@ -401,9 +401,15 @@ impl ChatWidget {
         self.stop_rate_limit_poller();
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(super) fn should_prefetch_rate_limits(&self) -> bool {
-        self.requires_openai_auth && self.has_chatgpt_account
+    pub(crate) fn should_prefetch_rate_limits(&self) -> bool {
+        // A provider with its own credentials (an API key or a proxy token) does not spend the
+        // ChatGPT login's quota, so polling that login's usage would only add requests.
+        let provider = &self.config.model_provider;
+        let provider_brings_credentials = provider.env_key.is_some()
+            || provider.experimental_bearer_token.is_some()
+            || provider.auth.is_some()
+            || provider.aws.is_some();
+        self.requires_openai_auth && self.has_chatgpt_account && !provider_brings_credentials
     }
 
     fn lower_cost_preset(&self) -> Option<ModelPreset> {
