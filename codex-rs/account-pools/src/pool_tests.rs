@@ -2,9 +2,13 @@ use crate::AccountBackend;
 use crate::AccountStore;
 use crate::ManagedBackend;
 use crate::PoolSession;
+use crate::policy::CREDIT_DETAILS_WAIT;
 use crate::policy::Decision;
+use crate::policy::WEEKLY_WAIT;
 use crate::policy::WindowKind;
 use crate::policy::decide;
+use crate::policy::known;
+use crate::policy::usable;
 use base64::Engine;
 use codex_backend_client::ConsumeRateLimitResetCreditCode;
 use codex_login::AuthConfig;
@@ -282,7 +286,18 @@ fn unknown_or_stale_readings_and_missing_windows_never_authorize_redemption() {
         |value: &mut ManagedAccountUsage| value.ordinary_usage_allowed = None,
         |value: &mut ManagedAccountUsage| value.model_supported = None,
         |value: &mut ManagedAccountUsage| value.windows.clear(),
-        |value: &mut ManagedAccountUsage| value.checked_at = 800,
+        // Stale readings stay unknown unless weekly exhaustion pins them until a future reset.
+        |value: &mut ManagedAccountUsage| {
+            value.checked_at = 1000 - 400;
+            value.windows[1].remaining_percent = 50.0;
+        },
+        |value: &mut ManagedAccountUsage| {
+            value.checked_at = 1000 - 400;
+            value.windows[1].resets_at = Some(900);
+        },
+        |value: &mut ManagedAccountUsage| {
+            value.checked_at = 800 - 3600;
+        },
         |value: &mut ManagedAccountUsage| value.windows[0].remaining_percent = f64::NAN,
     ] {
         let mut unknown = usage(
@@ -309,6 +324,38 @@ fn unknown_or_stale_readings_and_missing_windows_never_authorize_redemption() {
             Decision::Wait(PoolWaitReason::UnknownAvailability, _)
         ));
     }
+}
+
+#[test]
+fn hourly_readings_of_weekly_exhausted_accounts_remain_known() {
+    // Quota cannot return before the advertised reset, so a reading up to an hour old still
+    // supports the decision; the redemption itself re-reads before spending a credit.
+    let mut stale = usage(
+        "b", /*short*/ 0.0, /*weekly*/ 0.0, /*now*/ 1000,
+    );
+    stale.checked_at = 1000 - 3600;
+    stale.windows[1].resets_at = Some(5000);
+    let readings = vec![
+        with_credits(
+            usage(
+                "a", /*short*/ 50.0, /*weekly*/ 0.0, /*now*/ 1000,
+            ),
+            3,
+        ),
+        stale,
+    ];
+    assert!(known(&readings[1], 1000));
+    assert!(!usable(&readings[1], 1000));
+    assert_eq!(
+        decide(
+            &readings,
+            /*current*/ 0,
+            WindowKind::Weekly,
+            /*redeem_weekly*/ true,
+            /*now*/ 1000
+        ),
+        Decision::Redeem(0, "credit-2".to_owned())
+    );
 }
 
 #[test]
@@ -372,6 +419,18 @@ fn expired_credits_and_unknown_credit_details_wait_for_weekly_reset_or_missing_r
     for window in &mut reading.windows {
         window.resets_at = None;
     }
+    // Missing reset times and credit details are re-probed at the credit-details interval.
+    assert_eq!(
+        decide(
+            &[reading.clone()],
+            /*current*/ 0,
+            WindowKind::Weekly,
+            /*redeem_weekly*/ true,
+            /*now*/ 1000
+        ),
+        Decision::Wait(PoolWaitReason::WeeklyQuota, 1000 + CREDIT_DETAILS_WAIT)
+    );
+    reading.available_resets = Some(0);
     assert_eq!(
         decide(
             &[reading],
@@ -380,7 +439,7 @@ fn expired_credits_and_unknown_credit_details_wait_for_weekly_reset_or_missing_r
             /*redeem_weekly*/ true,
             /*now*/ 1000
         ),
-        Decision::Wait(PoolWaitReason::WeeklyQuota, 1060)
+        Decision::Wait(PoolWaitReason::WeeklyQuota, 1000 + WEEKLY_WAIT)
     );
 }
 

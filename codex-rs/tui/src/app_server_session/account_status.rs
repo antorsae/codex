@@ -1,4 +1,6 @@
 //! A bounded, display-only quota cache. Recovery and explicit usage requests always bypass it.
+//! Server-side, each read is also answered from observations shared across sessions, so several
+//! TUIs watching the same pool cost one backend request per interval, not one each.
 
 use crate::chatwidget::AccountStatusSnapshot;
 use codex_app_server_client::AppServerRequestHandle;
@@ -100,6 +102,17 @@ fn future_reset(window: &AccountQuotaWindow, after: i64) -> Option<i64> {
     })
 }
 
+/// Footer reads are display-only. Inference responses already refresh the selected account's
+/// quota through the server-side observation store, so these intervals only bound how stale a
+/// footer can get while a session is idle.
+const ACTIVE_REFRESH_SECS: i64 = 300;
+const INACTIVE_REFRESH_SECS: i64 = 1800;
+const ACTIVE_ERROR_RETRY_SECS: i64 = 300;
+const INACTIVE_ERROR_RETRY_SECS: i64 = 900;
+const EXHAUSTED_REFRESH_SECS: i64 = 3600;
+/// A pending read gets this long to finish before its predecessor stops being displayed.
+const GRACE_SECS: i64 = 300;
+
 impl Entry {
     fn refresh_at(&self, selected: &str) -> i64 {
         let active = self.account.alias == selected;
@@ -108,36 +121,60 @@ impl Entry {
             .as_ref()
             .and_then(|usage| weekly(usage).map(|weekly| (usage, weekly)))
         else {
-            // Retry the selected account promptly; unavailable inactive accounts get backoff.
-            return self.attempted_at + if active { 60 } else { 300 };
+            // Retry the selected account sooner; unavailable inactive accounts get backoff.
+            return self.attempted_at
+                + if active {
+                    ACTIVE_ERROR_RETRY_SECS
+                } else {
+                    INACTIVE_ERROR_RETRY_SECS
+                };
         };
+        // The server may answer from an observation older than this request; count the interval
+        // from the request so a shared observation is not re-requested on every tick.
+        let since = usage.checked_at.max(self.attempted_at);
         if weekly.remaining_percent == 0.0
-            && let Some(reset) = future_reset(weekly, usage.checked_at)
+            && let Some(reset) = future_reset(weekly, since)
         {
             // A short-window reset cannot restore exhausted weekly quota.
-            return usage.checked_at.saturating_add(3600).min(reset);
+            return since.saturating_add(EXHAUSTED_REFRESH_SECS).min(reset);
         }
-        let interval = if active { 60 } else { 600 };
+        let interval = if active {
+            ACTIVE_REFRESH_SECS
+        } else {
+            INACTIVE_REFRESH_SECS
+        };
+        // A reset that already passed when the observation was served is not a reason to ask
+        // again on every tick; the served observation is re-read once its own age warrants it.
         usage
             .windows
             .iter()
             .filter(|window| window.limit_id == "codex")
-            .filter_map(|window| future_reset(window, usage.checked_at))
+            .filter_map(|window| future_reset(window, since))
             .min()
             .unwrap_or(i64::MAX)
-            .min(usage.checked_at.saturating_add(interval))
+            .min(since.saturating_add(interval))
     }
 
-    fn valid_until(&self) -> Option<i64> {
+    fn valid_until(&self, selected: &str) -> Option<i64> {
         let usage = self.usage.as_ref()?;
         let weekly = weekly(usage)?;
+        let since = usage.checked_at.max(self.attempted_at);
         if weekly.remaining_percent == 0.0
-            && let Some(reset) = future_reset(weekly, usage.checked_at)
+            && let Some(reset) = future_reset(weekly, since)
         {
             // Allow a pending hourly read five minutes to finish, but never cross a reset.
-            return Some(usage.checked_at.saturating_add(65 * 60).min(reset));
+            return Some(
+                since
+                    .saturating_add(EXHAUSTED_REFRESH_SECS + GRACE_SECS)
+                    .min(reset),
+            );
         }
-        Some(usage.checked_at.saturating_add(15 * 60))
+        let interval = if self.account.alias == selected {
+            ACTIVE_REFRESH_SECS
+        } else {
+            INACTIVE_REFRESH_SECS
+        };
+        Some(since.saturating_add(interval + GRACE_SECS))
     }
 }
 
@@ -408,7 +445,7 @@ pub(crate) async fn load(
     }
     for account in accounts {
         if let Some(entry) = cache.entries.get(&account.alias) {
-            if let Some(valid_until) = entry.valid_until() {
+            if let Some(valid_until) = entry.valid_until(&selected.alias) {
                 snapshot.valid_until.insert(account.alias, valid_until);
             }
             snapshot.usage.extend(entry.usage.iter().cloned());

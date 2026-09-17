@@ -26,9 +26,15 @@ fn applicable(
             .is_none_or(|model| limit.model.as_ref() == Some(model) || &limit.limit_id == model)
 }
 
+/// Recovery re-reads a pool this often while it waits on a short window or on missing credit
+/// details, unless an earlier reset is advertised. Weekly waits probe hourly.
+pub(crate) const SHORT_WINDOW_WAIT: i64 = 600;
+pub(crate) const CREDIT_DETAILS_WAIT: i64 = 600;
+pub(crate) const WEEKLY_WAIT: i64 = 3600;
+
 pub(crate) fn known(usage: &ManagedAccountUsage, now: i64) -> bool {
     usage.error.is_none()
-        && (0..=90).contains(&(now - usage.checked_at))
+        && crate::observations::fresh_for_recovery(usage, now)
         && usage.ordinary_usage_allowed.is_some()
         && (usage.model.is_none() || usage.model_supported == Some(true))
         // Some plans expose only one ordinary quota window. Validate the windows
@@ -169,11 +175,17 @@ pub(crate) fn decide(
                 window
                     .resets_at
                     .filter(|reset| *reset > now)
-                    .unwrap_or(now + 60)
+                    .unwrap_or(now + WEEKLY_WAIT)
             })
             .min()
-            .unwrap_or(now + 60)
-            .min(now + if retry_credit_details { 60 } else { 3600 })
+            .unwrap_or(now + CREDIT_DETAILS_WAIT)
+            .min(
+                now + if retry_credit_details {
+                    CREDIT_DETAILS_WAIT
+                } else {
+                    WEEKLY_WAIT
+                },
+            )
     } else {
         usages
             .iter()
@@ -181,8 +193,8 @@ pub(crate) fn decide(
             .filter_map(|window| window.resets_at)
             .filter(|reset| *reset > now)
             .min()
-            .unwrap_or(now + 60)
-            .min(now + 60)
+            .unwrap_or(now + SHORT_WINDOW_WAIT)
+            .min(now + SHORT_WINDOW_WAIT)
     };
     Decision::Wait(reason, next)
 }

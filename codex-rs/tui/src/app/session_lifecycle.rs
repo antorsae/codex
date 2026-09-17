@@ -495,6 +495,8 @@ impl App {
             chat_widget.last_terminal_title = previous_terminal_title;
         }
         chat_widget.remote_connection = self.chat_widget.remote_connection.clone();
+        // A replacement widget must not re-arm the legacy periodic usage poll for a pooled session.
+        chat_widget.managed_accounts_active |= self.chat_widget.managed_accounts_active;
         chat_widget.set_local_worktree_operations(self.chat_widget.local_worktree_operations);
         chat_widget.set_agents_navigation_enabled(matches!(
             self.app_server_target,

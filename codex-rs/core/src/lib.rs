@@ -8,8 +8,10 @@
 mod account_pool_stream;
 mod account_pools;
 mod apply_patch;
+pub use account_pools::MANAGED_MODEL_CATALOG_TTL;
 pub use account_pools::enforce_selection_restrictions as enforce_account_selection_restrictions;
 pub use account_pools::initialize as initialize_account_pool;
+pub use account_pools::pool_models_cache;
 mod apps;
 mod client;
 mod client_common;

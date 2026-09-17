@@ -60,12 +60,20 @@ pub(crate) async fn redeem(
 ) -> Result<ManagedAccountUsage> {
     let path = store.credential_home(account).join("redemption.json");
     let _lock = crate::storage::lock(&path.with_extension("lock")).await?;
-    let fresh = backend.usage(account, model).await;
+    let fresh = backend.fresh_usage(account, model).await;
     let now = chrono::Utc::now().timestamp();
     if !policy::known(&fresh, now) {
         bail!("Availability is unknown; no reset was sent");
     }
     let previous = read_json::<Intent>(&path)?;
+    if previous.as_ref().is_some_and(|intent| {
+        intent.declined && intent.credit == credit && intent.windows == windows(&fresh)
+    }) && !policy::usable(&fresh, now)
+    {
+        // The backend already declined this credit for these quota windows; the next reset
+        // changes the windows and allows another attempt.
+        bail!("Backend declined this reset credit; waiting for verified quota recovery");
+    }
     let mut intent = match previous.filter(|intent| !intent.declined) {
         Some(mut intent) if !intent.completed => {
             // Even if the selected credit has disappeared, reconcile with the same key.
@@ -123,7 +131,7 @@ pub(crate) async fn redeem(
         ConsumeRateLimitResetCreditCode::NoCredit | ConsumeRateLimitResetCreditCode::NothingToReset
     );
     write_json(&path, &intent)?;
-    let fresh = backend.usage(account, model).await;
+    let fresh = backend.fresh_usage(account, model).await;
     if policy::usable(&fresh, chrono::Utc::now().timestamp()) {
         intent.observed_usable = true;
         write_json(&path, &intent)?;

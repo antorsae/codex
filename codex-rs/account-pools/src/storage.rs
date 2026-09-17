@@ -396,6 +396,17 @@ pub(crate) fn read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
     }
 }
 
+/// Atomically replace a cache file. Losing it to a crash only costs one extra read, so it skips
+/// the durability barriers that intents and configuration require.
+pub(crate) fn write_json_cache(path: &Path, value: &impl Serialize) -> Result<()> {
+    let parent = path.parent().context("State needs a parent directory")?;
+    std::fs::create_dir_all(parent)?;
+    let mut file = tempfile::NamedTempFile::new_in(parent)?;
+    file.write_all(&serde_json::to_vec(value)?)?;
+    file.persist(path)?;
+    Ok(())
+}
+
 /// Persist before sending a reset request. Both file contents and its directory entry are durable.
 pub(crate) fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
     let parent = path.parent().context("State needs a parent directory")?;

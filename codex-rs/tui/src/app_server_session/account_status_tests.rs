@@ -44,7 +44,7 @@ fn schedules_selected_inactive_and_exhausted_accounts_and_backs_off_errors() {
     for observation in &observations {
         cache.record(observation.account.clone(), Some(observation.clone()), NOW);
     }
-    let due: Vec<_> = [59, 60, 300, 600, 3600]
+    let due: Vec<_> = [299, 300, 900, 1800, 3600]
         .into_iter()
         .map(|elapsed| {
             observations
@@ -65,9 +65,9 @@ fn schedules_selected_inactive_and_exhausted_accounts_and_backs_off_errors() {
         ]
     );
     // Selecting an inactive account accelerates its checks; selecting an exhausted one does not.
-    assert!(cache.due(&observations[1].account, "inactive", NOW + 60));
-    assert!(!cache.due(&observations[2].account, "empty", NOW + 60));
-    assert!(cache.due(&observations[3].account, "unknown", NOW + 60));
+    assert!(cache.due(&observations[1].account, "inactive", NOW + 300));
+    assert!(!cache.due(&observations[2].account, "empty", NOW + 300));
+    assert!(cache.due(&observations[3].account, "unknown", NOW + 300));
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn hourly_exhausted_cache_preserves_timestamps_and_expires_at_reset() {
     assert_eq!(
         (
             entry.refresh_at("empty"),
-            entry.valid_until(),
+            entry.valid_until("empty"),
             entry.usage.clone()
         ),
         (NOW + 1800, Some(NOW + 1800), Some(exhausted))
@@ -91,13 +91,20 @@ fn hourly_exhausted_cache_preserves_timestamps_and_expires_at_reset() {
     assert_eq!(
         (
             cache.entries["missing"].refresh_at("empty"),
-            cache.entries["missing"].valid_until()
+            cache.entries["missing"].valid_until("empty")
         ),
-        (NOW + 600, Some(NOW + 900))
+        (NOW + 1800, Some(NOW + 2100))
+    );
+    assert_eq!(
+        (
+            cache.entries["missing"].refresh_at("missing"),
+            cache.entries["missing"].valid_until("missing")
+        ),
+        (NOW + 300, Some(NOW + 600))
     );
     let future = usage("future", 50.0, NOW + 1);
     cache.record(future.account.clone(), Some(future), NOW);
-    assert_eq!(cache.entries["future"].valid_until(), None);
+    assert_eq!(cache.entries["future"].valid_until("future"), None);
 }
 
 #[test]
@@ -126,7 +133,7 @@ fn unexpected_reset_sweeps_are_coalesced_and_exclude_scheduled_or_redeemed_reset
 }
 
 #[test]
-fn warm_pool_of_twenty_five_accounts_needs_eighty_four_hourly_reads() {
+fn warm_pool_of_twenty_five_accounts_needs_thirty_six_hourly_reads() {
     let mut cache = AccountStatusCache::default();
     let observations: Vec<_> = (0..25)
         .map(|index| usage(&index.to_string(), if index == 0 { 50.0 } else { 0.0 }, NOW))
@@ -146,7 +153,7 @@ fn warm_pool_of_twenty_five_accounts_needs_eighty_four_hourly_reads() {
             }
         }
     }
-    assert_eq!(requests, 84);
+    assert_eq!(requests, 36);
     assert_eq!(cache.entries.len(), 25);
 }
 

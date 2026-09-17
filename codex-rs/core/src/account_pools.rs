@@ -17,6 +17,76 @@ use tokio_util::sync::CancellationToken;
 #[path = "account_pools_tests.rs"]
 mod tests;
 
+/// How long a managed session reuses the selected account's cached model catalog.
+pub const MANAGED_MODEL_CATALOG_TTL: std::time::Duration = std::time::Duration::from_secs(3600);
+
+/// A catalog cache that follows the session's selected account, so a recovery switch stops
+/// reading and writing the previous account's catalog file.
+struct PoolModelsCache {
+    pool: Arc<PoolSession>,
+}
+
+impl std::fmt::Debug for PoolModelsCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PoolModelsCache")
+            .field("path", &self.pool.models_cache_path())
+            .finish()
+    }
+}
+
+impl PoolModelsCache {
+    fn current(&self) -> Arc<dyn codex_models_manager::cache::ModelsCache> {
+        codex_models_manager::cache::file_models_cache(
+            self.pool.models_cache_path(),
+            MANAGED_MODEL_CATALOG_TTL,
+        )
+    }
+}
+
+impl codex_models_manager::cache::ModelsCache for PoolModelsCache {
+    fn load<'a>(
+        &'a self,
+        client_version: &'a str,
+    ) -> codex_models_manager::cache::ModelsCacheFuture<
+        'a,
+        std::result::Result<
+            Option<codex_models_manager::cache::ModelsCacheEntry>,
+            codex_models_manager::cache::ModelsCacheError,
+        >,
+    > {
+        Box::pin(async move { self.current().load(client_version).await })
+    }
+
+    fn store<'a>(
+        &'a self,
+        entry: &'a codex_models_manager::cache::ModelsCacheEntry,
+    ) -> codex_models_manager::cache::ModelsCacheFuture<
+        'a,
+        std::result::Result<(), codex_models_manager::cache::ModelsCacheError>,
+    > {
+        Box::pin(async move { self.current().store(entry).await })
+    }
+
+    fn refresh_ttl<'a>(
+        &'a self,
+        client_version: &'a str,
+    ) -> codex_models_manager::cache::ModelsCacheFuture<
+        'a,
+        std::result::Result<(), codex_models_manager::cache::ModelsCacheError>,
+    > {
+        Box::pin(async move { self.current().refresh_ttl(client_version).await })
+    }
+}
+
+/// The model catalog cache for a pooled session's currently selected account.
+pub fn pool_models_cache(
+    pool: &Arc<PoolSession>,
+) -> Arc<dyn codex_models_manager::cache::ModelsCache> {
+    Arc::new(PoolModelsCache {
+        pool: Arc::clone(pool),
+    })
+}
+
 pub async fn initialize(
     config: &Config,
     legacy: &AuthManager,
@@ -120,6 +190,34 @@ pub(crate) async fn before_request(
         .await;
     }
     Ok(())
+}
+
+/// Share the quota windows a response reported, so footers and other sessions need no extra read.
+pub(crate) async fn record_rate_limits(
+    sess: &Session,
+    snapshot: &codex_protocol::protocol::RateLimitSnapshot,
+) {
+    if let Some(pool) = sess
+        .services
+        .thread_extension_data
+        .get::<Arc<PoolSession>>()
+    {
+        // Recording is best effort and must not delay the response stream.
+        let pool: Arc<PoolSession> = Arc::clone(pool.as_ref());
+        let snapshot = snapshot.clone();
+        tokio::spawn(async move { pool.record_rate_limits(&snapshot).await });
+    }
+}
+
+/// A model request was rejected for quota on the selected account.
+pub(crate) async fn note_quota_rejection(sess: &Session) {
+    if let Some(pool) = sess
+        .services
+        .thread_extension_data
+        .get::<Arc<PoolSession>>()
+    {
+        pool.note_quota_rejection().await;
+    }
 }
 
 pub(crate) async fn record_success(sess: &Session) {

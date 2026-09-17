@@ -3,6 +3,7 @@
 mod backend;
 mod coordinator;
 mod login;
+mod observations;
 mod policy;
 mod redemption;
 mod storage;
@@ -11,6 +12,8 @@ pub(crate) use backend::AccountBackend;
 pub use backend::ManagedBackend;
 pub use coordinator::PoolSession;
 pub use login::AccountLogin;
+pub use observations::DISPLAY_MAX_AGE;
+pub use observations::RECOVERY_MAX_AGE;
 pub use storage::AccountStore;
 
 #[cfg(test)]

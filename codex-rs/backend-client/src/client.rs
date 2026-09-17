@@ -276,6 +276,7 @@ impl Client {
     ) -> Result<(String, String)> {
         let res = req.send().await?;
         let status = res.status();
+        tracing::debug!(target: "codex_backend_client::http", method, url, status = status.as_u16(), "backend request completed");
         let ct = res
             .headers()
             .get(CONTENT_TYPE)
@@ -297,6 +298,7 @@ impl Client {
     ) -> std::result::Result<(String, String), RequestError> {
         let res = req.send().await.map_err(anyhow::Error::from)?;
         let status = res.status();
+        tracing::debug!(target: "codex_backend_client::http", method, url, status = status.as_u16(), "backend request completed");
         let content_type = res
             .headers()
             .get(CONTENT_TYPE)

@@ -2057,6 +2057,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "tracing",
  "uuid",
  "wiremock",
 ]
@@ -2535,6 +2536,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
  "url",
  "wiremock",
 ]

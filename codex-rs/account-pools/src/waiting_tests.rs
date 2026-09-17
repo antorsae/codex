@@ -14,9 +14,9 @@ fn weekly_backoff_retries_unknown_credit_metadata_only_when_redemption_is_enable
         expires_at: Some(1000),
     };
     for (available_resets, resets, delay) in [
-        (Some(2), None, 60),
-        (None, None, 60),
-        (None, Some(vec![valid]), 60),
+        (Some(2), None, 600),
+        (None, None, 600),
+        (None, Some(vec![valid]), 600),
         (Some(0), None, 3600),
         (Some(2), Some(Vec::new()), 3600),
         (None, Some(vec![expired]), 3600),
@@ -45,7 +45,7 @@ fn weekly_backoff_retries_unknown_credit_metadata_only_when_redemption_is_enable
 }
 
 #[tokio::test(start_paused = true)]
-async fn weekly_wait_recovers_when_missing_credit_details_return_after_a_minute() {
+async fn weekly_wait_recovers_when_missing_credit_details_return_after_ten_minutes() {
     let (_home, store) = populated_store().await;
     let session = PoolSession::open(
         store,
@@ -80,15 +80,20 @@ async fn weekly_wait_recovers_when_missing_credit_details_return_after_a_minute(
         Some(AccountPoolEvent::Waiting {
             account: "a".to_owned(),
             reason: PoolWaitReason::WeeklyQuota,
-            next_check_at: now + 60,
+            next_check_at: now + 600,
         })
     );
+    let mut credited = with_credits(pending, /*count*/ 2);
+    // Banked credits must outlive the ten-minute wait.
+    for credit in credited.resets.as_mut().unwrap() {
+        credit.expires_at = Some(now + 5_000);
+    }
     backend
         .usage
         .lock()
         .unwrap()
-        .insert("a".to_owned(), with_credits(pending, /*count*/ 2));
-    tokio::time::advance(Duration::from_secs(/*secs*/ 59)).await;
+        .insert("a".to_owned(), credited);
+    tokio::time::advance(Duration::from_secs(/*secs*/ 599)).await;
     tokio::task::yield_now().await;
     assert_eq!(backend.usage_calls.load(Ordering::SeqCst), 2);
     tokio::time::advance(Duration::from_secs(/*secs*/ 1)).await;

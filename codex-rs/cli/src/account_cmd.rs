@@ -17,7 +17,7 @@ pub struct AccountCli {
     action: AccountCommand,
     #[arg(long, global = true)]
     json: bool,
-    /// Refresh read-only output every 60 seconds until interrupted.
+    /// Refresh read-only output every five minutes until interrupted.
     #[arg(long, global = true)]
     watch: bool,
 }
@@ -265,6 +265,6 @@ fn output(value: &impl serde::Serialize, json: bool) -> Result<()> {
 async fn interrupted() -> bool {
     tokio::select! {
         _ = tokio::signal::ctrl_c() => true,
-        _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => false,
+        _ = tokio::time::sleep(std::time::Duration::from_secs(300)) => false,
     }
 }

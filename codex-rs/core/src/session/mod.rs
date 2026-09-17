@@ -624,15 +624,20 @@ impl Session {
         let (auth_manager, models_manager) = if let Some(pool) = pool_session {
             config.account_selection = Some(pool.selection().clone());
             let auth = pool.auth_manager();
+            // Catalogs are cached per account, so sibling sessions and child agents share one
+            // download per hour instead of fetching the catalog on every start.
             let models = create_model_provider(config.model_provider.clone(), Some(auth.clone()))
-                .models_manager_without_cache(config.model_catalog.clone());
+                .models_manager_with_cache(
+                    config.model_catalog.clone(),
+                    crate::account_pools::pool_models_cache(&pool),
+                );
             thread_extension_init.insert(pool);
             (auth, models)
         } else {
             (auth_manager, models_manager)
         };
         let mut config = Arc::new(config);
-        // Managed sessions construct a fresh uncached manager, including child agents.
+        // Managed sessions construct their own per-account manager, including child agents.
         let refresh_strategy = if session_source.is_non_root_agent() && !has_managed_account {
             codex_models_manager::manager::RefreshStrategy::Offline
         } else {
@@ -4516,6 +4521,7 @@ impl Session {
     }
 
     pub(crate) async fn record_rate_limits_info(&self, new_rate_limits: RateLimitSnapshot) {
+        crate::account_pools::record_rate_limits(self, &new_rate_limits).await;
         {
             let mut state = self.state.lock().await;
             state.set_rate_limits(new_rate_limits);

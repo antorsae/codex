@@ -160,9 +160,11 @@ async fn replacement_footer_resolves_destination_pool_and_rejects_previous_widge
     )?;
     let event = load_footer_status(&mut app, &mut tui, &mut server, &mut events).await?;
     app.handle_event(&mut tui, &mut server, event).await?;
+    // Observations shared on disk outlive the TUI cache, so a backend failure inside the display
+    // freshness window keeps the last known quota instead of blanking the footer.
     assert_snapshot!(
         app.chat_widget.status_line_text().expect("pool remains visible"),
-        @"a unknown · work unknown"
+        @"a 0% · work 90%"
     );
     backend.reset().await;
     while events.try_recv().is_ok() {}

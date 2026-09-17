@@ -1511,6 +1511,7 @@ async fn run_sampling_request(
                     if let Some(rate_limits) = rate_limits {
                         sess.update_rate_limits(&turn_context, *rate_limits).await;
                     }
+                    crate::account_pools::note_quota_rejection(&sess).await;
                     if crate::account_pools::recover(
                         &sess,
                         &turn_context,

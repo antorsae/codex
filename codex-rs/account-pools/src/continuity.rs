@@ -3,6 +3,7 @@
 use super::*;
 use crate::policy::known;
 use crate::storage::lock;
+use codex_protocol::protocol::RateLimitSnapshot;
 use std::collections::BTreeMap;
 
 type Preferences = BTreeMap<String, ManagedAccount>;
@@ -61,6 +62,31 @@ impl PoolSession {
         write_json(&path, &preferences)
     }
 
+    /// Share the quota windows an inference response reported for the selected account, so
+    /// footers and other sessions can display them without another usage read.
+    pub async fn record_rate_limits(&self, snapshot: &RateLimitSnapshot) {
+        let current = self.selected_account().await;
+        crate::observations::record_response(
+            &self.store,
+            &current,
+            snapshot,
+            chrono::Utc::now().timestamp(),
+        )
+        .await;
+    }
+
+    /// A model request was rejected for quota: invalidate the shared read of the selected account
+    /// and hold it unusable for other sessions while usage catches up with the rejection.
+    pub async fn note_quota_rejection(&self) {
+        let current = self.selected_account().await;
+        crate::observations::record_rejection(
+            &self.store,
+            &current,
+            chrono::Utc::now().timestamp(),
+        )
+        .await;
+    }
+
     /// Check quota once before this session's first inference. Unknown usage is not rejection.
     pub async fn needs_recovery(&self, model: &str, cancel: &CancellationToken) -> Result<bool> {
         tokio::select! {
@@ -75,7 +101,7 @@ impl PoolSession {
                     return Ok(false);
                 }
                 let current = self.selected_account().await;
-                let usage = ManagedBackend::new(self.store.clone()).usage(&current, Some(model)).await;
+                let usage = ManagedBackend::new(self.store.clone()).recovery_usage(&current, Some(model)).await;
                 let now = chrono::Utc::now().timestamp();
                 let blocked = known(&usage, now) && !usable(&usage, now);
                 self.needs_preflight.store(blocked, Ordering::Release);

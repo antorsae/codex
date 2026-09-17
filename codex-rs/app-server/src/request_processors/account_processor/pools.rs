@@ -96,7 +96,7 @@ impl AccountRequestProcessor {
                         Some(pool.auth_manager()),
                     );
                     if params.action == ManagedAccountAction::Models {
-                        models = Some(provider.models_manager_without_cache(config.model_catalog.clone())
+                        models = Some(provider.models_manager_with_cache(config.model_catalog.clone(), codex_core::pool_models_cache(&pool))
                             .list_models(codex_models_manager::manager::RefreshStrategy::OnlineIfUncached, config.http_client_factory()).await
                             .into_iter().map(crate::models::model_from_preset).collect());
                     }
@@ -236,7 +236,9 @@ impl AccountRequestProcessor {
                     let action = action.clone();
                     async move {
                         if action == ManagedAccountAction::Quota {
-                            backend.quota(&account).await
+                            backend
+                                .quota(&account, codex_account_pools::DISPLAY_MAX_AGE)
+                                .await
                         } else {
                             backend.usage(&account, model.as_deref()).await
                         }

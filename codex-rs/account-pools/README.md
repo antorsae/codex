@@ -25,7 +25,7 @@ Fresh launches prefer the last account that completed a model response in the se
 - `account redeem ALIAS [--model MODEL]` explicitly redeems an existing usable credit. It does not purchase credits.
 - `pool create NAME ALIAS...`, `pool update NAME ALIAS...`, `pool list`, `pool inspect NAME`, `pool remove NAME`, and `pool select NAME` manage pools. `pool select --clear` clears the default.
 - Add `--no-auto-reset` to pool creation or update to wait for weekly recovery without spending banked credits. Updating a pool replaces its ordered membership and reset policy.
-- Account and pool commands support `--json`; read-only list, usage and inspect commands also support `--watch` with a 60-second interval. Interrupt to stop watching.
+- Account and pool commands support `--json`; read-only list, usage and inspect commands also support `--watch` with a five-minute interval. Interrupt to stop watching.
 
 TUI has `/accounts` and `/pools` with the corresponding commands. `/usage` shows named-account usage when a named selection is active. Account switches, verified redemptions and waiting deadlines appear in the conversation. Recovery reloads pool membership and policy from a complete configuration snapshot, including accounts added while waiting. Existing sessions retain their selected pool when the default changes.
 
@@ -35,7 +35,13 @@ The current account remains selected until the initial quota check or a model re
 
 When all otherwise eligible accounts are weekly exhausted, automatic reset policy chooses the account with the most banked resets and its earliest-expiring usable credit. A short-window block with weekly capacity remaining waits without spending a reset. Failed or incomplete usage reads cannot authorize switching or redemption. Backend window durations, model availability, credit expiry and reset outcomes are authoritative.
 
-Waiting sessions check every 60 seconds or at an earlier advertised reset. Network failures use bounded backoff up to five minutes. Pools contain at most 128 distinct accounts; bounded concurrent reads keep large-pool observations fresh.
+Waiting sessions re-read the pool at the earliest advertised reset, and otherwise every ten minutes for short-window waits or missing credit details and hourly for weekly exhaustion. Failed reads back off from ten to thirty minutes between pool re-reads, still honoring an earlier advertised reset. Pools contain at most 128 distinct accounts; bounded concurrent reads keep large-pool observations fresh.
+
+## Shared observations
+
+Every usage read is stored next to the account's credentials (`usage.json` and `model-slugs.json` under `accounts/credentials/<identity>/`), so concurrent sessions, sub-agents, footers and preflights do not repeat the same backend requests. Recovery and preflight reuse a read that is at most five minutes old, keep a weekly-exhausted account's last read for up to an hour before its reset, and only fetch banked reset details once the weekly window is exhausted. Verification after a redemption and before activating an account always reads fresh. Model catalogs are reused for a day; a requested model missing from a catalog older than ten minutes is re-checked once. Managed sessions also cache the selected account's model catalog for an hour instead of downloading it on every start.
+
+A read is never reused once one of its windows has reset. A model request rejected for quota invalidates the selected account's shared read and holds the account unusable for other sessions for a minute, since usage lags such rejections. Quota windows that inference responses report are recorded for the selected account. Footers and other display surfaces accept them, and accept stored reads up to ten minutes old; recovery never decides from response-derived windows. Failed reads are not repeated within two minutes unless the caller asks for a fresh read. Every ChatGPT backend-API request made by the account tooling (usage, reset credits, catalog checks) is logged at debug level under the `codex_backend_client::http` target, and catalog downloads under `codex_http_client`, so request volume can be audited from the log database.
 
 Recovery happens at a model-request boundary after outstanding tool work settles, including during compaction. It retains conversation history, partial assistant output and completed tool results, clears account-bound transport state, and retries the same model. Completed tools are not replayed. Cancellation stops monitoring. Durable recovery state is consulted only when a session is explicitly resumed and a new turn is submitted; no monitor survives process exit.
 

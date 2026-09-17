@@ -221,6 +221,19 @@ impl PoolSession {
         account
     }
 
+    /// Where this session caches the selected account's model catalog. Catalogs differ by plan,
+    /// so they are stored next to each account's credentials rather than in the shared home.
+    pub fn models_cache_path(&self) -> PathBuf {
+        let current = self
+            .current
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        self.store
+            .credential_home(&current)
+            .join("models_cache.json")
+    }
+
     pub fn is_waiting(&self) -> bool {
         self.waiting.load(Ordering::Acquire)
     }
@@ -353,7 +366,8 @@ impl PoolSession {
                         account.user_id == current.user_id && account.workspace_id == current.workspace_id
                     }).unwrap_or(accounts.len());
                     // At most 128 pool members and 32 concurrent reads keep all observations
-                    // within the 90-second freshness bound (each read has a 20-second timeout).
+                    // within the recovery freshness bound: each read waits at most 25 seconds
+                    // for another session's read of the same account and 20 seconds on the network.
                     let mut reads = Vec::with_capacity(accounts.len());
                     for account in accounts { reads.push(backend.usage(account, Some(model))); }
                     let mut usages: Vec<_> = futures::stream::iter(reads).buffered(32).collect().await;
@@ -398,7 +412,7 @@ impl PoolSession {
                     }
                     let (reason, mut next) = match decision {
                         Decision::Use(index) => {
-                            let fresh = backend.usage(&accounts[index], Some(model)).await;
+                            let fresh = backend.fresh_usage(&accounts[index], Some(model)).await;
                             if usable(&fresh, chrono::Utc::now().timestamp())
                                 && read_membership().ok().as_ref() == Some(&membership)
                                 && self.activate(&accounts[index]).await.is_ok()
@@ -430,7 +444,7 @@ impl PoolSession {
                                     self.waiting.store(/*val*/ false, Ordering::Release);
                                     return Ok(());
                                 }
-                                Ok(_) | Err(_) => (PoolWaitReason::RedemptionPending, now + 60),
+                                Ok(_) | Err(_) => (PoolWaitReason::RedemptionPending, now + crate::policy::CREDIT_DETAILS_WAIT),
                             }
                         }
                         Decision::Wait(reason, next) => (reason, next),
@@ -438,9 +452,10 @@ impl PoolSession {
                     drop(redemption_guard.take());
                     if reason == PoolWaitReason::UnknownAvailability {
                         failures = (failures + 1).min(3);
-                        // Back off failed reads, but still honor an earlier advertised reset.
-                        if next == now + 60 {
-                            let backoff = now + (60i64 << failures).min(300);
+                        // Back off failed reads beyond the normal interval, but still honor an
+                        // earlier advertised reset. A failed confirming read keeps its short wait.
+                        if next >= now + crate::policy::SHORT_WINDOW_WAIT {
+                            let backoff = now + (crate::policy::SHORT_WINDOW_WAIT << (failures - 1)).min(1800);
                             next = usages.iter().flat_map(|usage| &usage.windows)
                                 .filter_map(|window| window.resets_at).filter(|reset| *reset > now)
                                 .min().unwrap_or(backoff).min(backoff);
