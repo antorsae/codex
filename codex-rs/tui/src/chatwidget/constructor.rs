@@ -285,6 +285,7 @@ impl ChatWidget {
             last_rendered_user_message_display: None,
             last_rendered_user_message_client_id: None,
             last_non_retry_error: None,
+            capacity_retry: capacity_retry::CapacityRetryState::default(),
             #[cfg(test)]
             test_codex_home: None,
         };

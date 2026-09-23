@@ -256,6 +256,7 @@ use crate::text_formatting::truncate_text;
 use crate::tui::FrameRequester;
 mod activity_groups;
 mod activity_presentation;
+mod capacity_retry;
 mod command_lifecycle;
 mod connector_mentions;
 mod connectors;
@@ -773,6 +774,7 @@ pub(crate) struct ChatWidget {
     last_rendered_user_message_display: Option<UserMessageDisplay>,
     last_rendered_user_message_client_id: Option<String>,
     last_non_retry_error: Option<(String, String)>,
+    capacity_retry: capacity_retry::CapacityRetryState,
     // Keep fixture storage alive until all other widget fields have been dropped.
     #[cfg(test)]
     pub(crate) test_codex_home: Option<tempfile::TempDir>,
@@ -1159,6 +1161,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn pre_draw_tick(&mut self) {
+        self.retry_capacity_if_due();
         self.update_due_hook_visibility();
         self.schedule_hook_timer_if_needed();
         self.bottom_pane.pre_draw_tick();
