@@ -76,6 +76,7 @@ impl ChatWidget {
 
     pub(super) fn on_task_started(&mut self) {
         self.bottom_pane.dismiss_composer_sparkle();
+        self.cancel_capacity_retry();
         self.clear_context_compaction();
         self.input_queue.user_turn_pending_start = false;
         self.reset_safety_buffering_for_turn_start();
@@ -498,6 +499,9 @@ impl ChatWidget {
         message: String,
         codex_error_info: Option<AppServerCodexErrorInfo>,
     ) {
+        if codex_error_info != Some(AppServerCodexErrorInfo::ServerOverloaded) {
+            self.capacity_retry.reset();
+        }
         if codex_error_info
             .as_ref()
             .is_some_and(|info| self.handle_app_server_steer_rejected_error(info))

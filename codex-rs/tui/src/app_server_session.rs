@@ -1438,10 +1438,10 @@ impl AppServerSession {
                 params: TurnStartParams {
                     disabled_plugin_ids: None,
                     thread_id: thread_id.to_string(),
-                    turn_trigger: Some("user".to_string()),
+                    turn_trigger: Some(if items.is_empty() { "retry" } else { "user" }.to_string()),
                     parent_turn_id: None,
                     root_turn_id: None,
-                    client_user_message_id: Some(client_user_message_id),
+                    client_user_message_id: (!items.is_empty()).then_some(client_user_message_id),
                     input: items,
                     tool_output: None,
                     responsesapi_client_metadata: None,
