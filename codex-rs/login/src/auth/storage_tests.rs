@@ -65,6 +65,71 @@ async fn file_storage_save_persists_auth_dot_json() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test]
+fn file_storage_replacement_preserves_an_in_flight_read() -> anyhow::Result<()> {
+    let codex_home = tempdir()?;
+    let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
+    let original: AuthDotJson = serde_json::from_value(json!({"OPENAI_API_KEY": "old-key"}))?;
+    let replacement: AuthDotJson = serde_json::from_value(json!({"OPENAI_API_KEY": "new-key"}))?;
+    storage.save(&original)?;
+
+    let mut reader = File::open(get_auth_file(codex_home.path()))?;
+    let mut bytes = vec![0; 10];
+    reader.read_exact(&mut bytes)?;
+    storage.save(&replacement)?;
+    reader.read_to_end(&mut bytes)?;
+
+    assert_eq!(
+        (
+            serde_json::from_slice::<AuthDotJson>(&bytes)?,
+            storage.load()?
+        ),
+        (original, Some(replacement)),
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn file_storage_save_preserves_existing_and_dangling_symlinks() -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let original: AuthDotJson = serde_json::from_value(json!({"OPENAI_API_KEY": "old-key"}))?;
+    let replacement: AuthDotJson = serde_json::from_value(json!({"OPENAI_API_KEY": "new-key"}))?;
+    for relative in [false, true] {
+        for initial in [Some(&original), None] {
+            let codex_home = tempdir()?;
+            let target_home = codex_home.path().join("credentials");
+            std::fs::create_dir(&target_home)?;
+            let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
+            let target = FileAuthStorage::new(target_home.clone());
+            if let Some(initial) = initial {
+                target.save(initial)?;
+            }
+            let target_file = get_auth_file(&target_home);
+            let auth_file = get_auth_file(codex_home.path());
+            let link_target = if relative {
+                PathBuf::from("credentials/auth.json")
+            } else {
+                target_file.clone()
+            };
+            std::os::unix::fs::symlink(&link_target, &auth_file)?;
+
+            storage.save(&replacement)?;
+
+            assert_eq!(
+                (
+                    std::fs::read_link(&auth_file)?,
+                    target.load()?,
+                    std::fs::metadata(&target_file)?.permissions().mode() & 0o777,
+                ),
+                (link_target, Some(replacement.clone()), 0o600),
+            );
+        }
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn file_storage_round_trips_agent_identity_auth() -> anyhow::Result<()> {
     let codex_home = tempdir()?;

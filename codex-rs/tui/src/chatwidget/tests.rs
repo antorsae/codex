@@ -227,6 +227,8 @@ fn next_goal_draft(
     }
 }
 
+#[path = "tests/account_pools_tests.rs"]
+mod account_pools;
 mod app_server;
 mod approval_requests;
 #[path = "tests/backend_banners_tests.rs"]

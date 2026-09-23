@@ -37,6 +37,8 @@ expression: commands
 /warnings - view retained warnings and diagnostic details
 /cd - change the current working directory
 /pwd - show the current working directory
+/accounts - manage named ChatGPT accounts and view their quota
+/pools - manage account pools and their quota recovery policy
 /title - configure which items appear in the terminal title
 /statusline - configure which items appear in the status line
 /theme - choose a syntax highlighting theme

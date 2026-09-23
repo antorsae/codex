@@ -1,5 +1,12 @@
 //! App-level orchestration tests for the TUI.
 
+#[path = "tests/account_pool_recovery_tests.rs"]
+mod account_pool_recovery_tests;
+#[path = "tests/account_pools_tests.rs"]
+mod account_pools_tests;
+#[path = "tests/account_status_lifecycle_tests.rs"]
+mod account_status_lifecycle_tests;
+
 #[path = "tests/daybreak_tests.rs"]
 mod daybreak_tests;
 #[path = "tests/math_interruption_tests.rs"]

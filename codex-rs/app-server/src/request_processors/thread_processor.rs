@@ -227,17 +227,43 @@ fn collect_resume_override_mismatches(
     mismatch_details
 }
 
+/// Whether a resumed thread keeps the provider persisted with it. Two providers that both
+/// target OpenAI's API, such as the built-in one and a proxy that mirrors it, are
+/// interchangeable for a thread's history, so the configured one wins: changing
+/// `model_provider` in the configuration moves resumed threads along with new ones.
+fn persisted_provider_applies(
+    persisted: &str,
+    configured: &str,
+    providers: &HashMap<String, codex_model_provider_info::ModelProviderInfo>,
+) -> bool {
+    persisted == configured
+        || !(providers
+            .get(persisted)
+            .is_some_and(codex_model_provider_info::ModelProviderInfo::is_openai)
+            && providers
+                .get(configured)
+                .is_some_and(codex_model_provider_info::ModelProviderInfo::is_openai))
+}
+
 fn merge_persisted_resume_metadata(
     request_overrides: &mut Option<HashMap<String, serde_json::Value>>,
     typesafe_overrides: &mut ConfigOverrides,
     persisted_metadata: &ThreadMetadata,
+    configured_provider: &str,
+    providers: &HashMap<String, codex_model_provider_info::ModelProviderInfo>,
 ) {
     if has_model_resume_override(request_overrides.as_ref(), typesafe_overrides) {
         return;
     }
 
     typesafe_overrides.model = persisted_metadata.model.clone();
-    typesafe_overrides.model_provider = Some(persisted_metadata.model_provider.clone());
+    if persisted_provider_applies(
+        &persisted_metadata.model_provider,
+        configured_provider,
+        providers,
+    ) {
+        typesafe_overrides.model_provider = Some(persisted_metadata.model_provider.clone());
+    }
 
     if let Some(reasoning_effort) = persisted_metadata.reasoning_effort.as_ref() {
         request_overrides.get_or_insert_with(HashMap::new).insert(
@@ -1134,6 +1160,8 @@ impl ThreadRequestProcessor {
         request_context: RequestContext,
     ) -> Result<(), JSONRPCErrorError> {
         let ThreadStartParams {
+            account_selection,
+            account_selection_source_thread_id,
             model,
             model_provider,
             allow_provider_model_fallback,
@@ -1212,6 +1240,8 @@ impl ThreadRequestProcessor {
             personality,
         );
         typesafe_overrides.ephemeral = ephemeral;
+        typesafe_overrides.account_selection = account_selection;
+        typesafe_overrides.account_selection_source_thread_id = account_selection_source_thread_id;
         let listener_task_context = ListenerTaskContext {
             thread_manager: Arc::clone(&self.thread_manager),
             thread_state_manager: self.thread_state_manager.clone(),
@@ -3703,6 +3733,7 @@ impl ThreadRequestProcessor {
         };
 
         let ThreadResumeParams {
+            account_selection,
             thread_id,
             history,
             path,
@@ -3910,6 +3941,7 @@ impl ThreadRequestProcessor {
             developer_instructions,
             personality,
         );
+        typesafe_overrides.account_selection = account_selection;
         if typesafe_overrides.approval_policy.is_none()
             && let Some(value) = request_overrides
                 .as_mut()
@@ -4261,7 +4293,13 @@ impl ThreadRequestProcessor {
             .await
             .ok()
             .flatten()?;
-        merge_persisted_resume_metadata(request_overrides, typesafe_overrides, &persisted_metadata);
+        merge_persisted_resume_metadata(
+            request_overrides,
+            typesafe_overrides,
+            &persisted_metadata,
+            &self.config.model_provider_id,
+            &self.config.model_providers,
+        );
         Some(persisted_metadata)
     }
 
@@ -4318,6 +4356,13 @@ impl ThreadRequestProcessor {
         };
 
         if let Some((existing_thread_id, existing_thread, mut source_thread)) = running_thread {
+            if let Some(selection) = &params.account_selection
+                && existing_thread.config().await.account_selection.as_ref() != Some(selection)
+            {
+                return Err(invalid_request(
+                    "An active thread's account selection cannot change; unload it before resuming with a different selection",
+                ));
+            }
             let paginated_resume =
                 matches!(source_thread.history_mode, ThreadHistoryMode::Paginated);
             let existing_thread_rollout_path = existing_thread.rollout_path();
@@ -4864,6 +4909,7 @@ impl ThreadRequestProcessor {
         client_mcp_extensions: ClientMcpExtensions,
     ) -> Result<(), JSONRPCErrorError> {
         let ThreadForkParams {
+            account_selection,
             thread_id,
             last_turn_id,
             before_turn_id,
@@ -5018,6 +5064,7 @@ impl ThreadRequestProcessor {
             developer_instructions,
             /*personality*/ None,
         );
+        typesafe_overrides.account_selection = account_selection;
         typesafe_overrides.ephemeral = ephemeral.then_some(true);
         let restore_approval_policy = typesafe_overrides.approval_policy.is_none();
         let restore_approvals_reviewer = typesafe_overrides.approvals_reviewer.is_none()

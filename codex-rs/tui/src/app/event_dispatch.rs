@@ -134,6 +134,18 @@ impl App {
                 // Keep this RPC future out of the event loop's stack frame.
                 Box::pin(self.finish_user_verification(app_server, thread_id, server_name, request_id, attempt_id, result)).await?;
             }
+            AppEvent::ManagedAccounts { args } => self.manage_accounts(app_server, &args),
+            AppEvent::ManagedPools { args } => self.manage_pools(app_server, &args),
+            AppEvent::RefreshAccountStatus { request_id, thread_id, include_pool_usage } => {
+                self.refresh_account_status(app_server, request_id, thread_id, include_pool_usage);
+            }
+            AppEvent::AccountStatusLoaded { request_id, result } => {
+                self.chat_widget.finish_account_status(request_id, result);
+            }
+            AppEvent::ManagedAccountOutput { result } => match result {
+                Ok(report) => self.chat_widget.add_account_pool_report(report),
+                Err(message) => self.chat_widget.add_error_message(message),
+            },
             AppEvent::ReviewMisalignment(review) => {
                 self.open_misalignment_review(tui, review);
             }

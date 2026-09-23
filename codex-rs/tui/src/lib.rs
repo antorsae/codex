@@ -57,7 +57,6 @@ use codex_features::Feature;
 use codex_login::AuthConfig;
 use codex_login::default_client::originator;
 use codex_login::default_client::set_default_client_residency_requirement;
-use codex_login::enforce_login_restrictions;
 use codex_login::is_workload_identity_selected;
 use codex_protocol::ThreadId;
 use codex_protocol::auth::AuthMode;
@@ -1266,6 +1265,11 @@ async fn run_ratatui_app(
         let Some(active_app_server) = app_server.as_mut() else {
             unreachable!("app server should exist when auth is required");
         };
+        // The resumed thread is not known yet; its selection is applied after the picker.
+        active_app_server.set_account_selection(
+            initial_config.account_selection.clone(),
+            /*thread_id*/ None,
+        );
         let login_status = startup_draft
             .run_until(&mut tui, get_login_status(active_app_server))
             .await;
@@ -1511,22 +1515,24 @@ async fn run_ratatui_app(
                 shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
                 return Err(err.into());
             }
-            let Some(app_server) = app_server.take() else {
+            let Some(picker_server) = app_server.take() else {
                 unreachable!("app server should be initialized for --fork picker");
             };
             let picker_local_settings =
                 crate::local_settings::LocalSettings::for_tui(&config, &tui);
-            match resume_picker::run_fork_picker_with_app_server(
+            let (selection, returned_server) = resume_picker::run_fork_picker_with_app_server(
                 uses_remote_workspace_or_environment(&app_server_target, &environment_manager),
                 &mut tui,
                 &config,
                 &picker_local_settings,
                 cli.fork_show_all,
-                app_server,
+                picker_server,
             )
-            .await?
-            {
+            .await?;
+            app_server = Some(returned_server);
+            match selection {
                 resume_picker::SessionSelection::Exit => {
+                    shutdown_app_server_if_present(app_server.take()).await;
                     terminal_restore_guard.restore_silently();
                     session_log::log_session_end();
                     return Ok(AppExitInfo {
@@ -1610,22 +1616,24 @@ async fn run_ratatui_app(
             shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
             return Err(err.into());
         }
-        let Some(app_server) = app_server.take() else {
+        let Some(picker_server) = app_server.take() else {
             unreachable!("app server should be initialized for --resume picker");
         };
         let picker_local_settings = crate::local_settings::LocalSettings::for_tui(&config, &tui);
-        match resume_picker::run_resume_picker_with_app_server(
+        let (selection, returned_server) = resume_picker::run_resume_picker_with_app_server(
             uses_remote_workspace_or_environment(&app_server_target, &environment_manager),
             &mut tui,
             &config,
             &picker_local_settings,
             cli.resume_show_all,
             cli.resume_include_non_interactive,
-            app_server,
+            picker_server,
         )
-        .await?
-        {
+        .await?;
+        app_server = Some(returned_server);
+        match selection {
             resume_picker::SessionSelection::Exit => {
+                shutdown_app_server_if_present(app_server.take()).await;
                 terminal_restore_guard.restore_silently();
                 session_log::log_session_end();
                 return Ok(AppExitInfo {
@@ -1800,6 +1808,20 @@ async fn run_ratatui_app(
             }
         },
     };
+
+    let selected_account_thread = match &session_selection {
+        resume_picker::SessionSelection::Resume(target)
+        | resume_picker::SessionSelection::Fork(target) => Some(target.thread_id.to_string()),
+        _ => None,
+    };
+    app_server.set_account_selection(config.account_selection.clone(), selected_account_thread);
+    // A picker can select a different account from the one used during initial login.
+    if matches!(
+        &session_selection,
+        resume_picker::SessionSelection::Resume(_) | resume_picker::SessionSelection::Fork(_)
+    ) {
+        startup_account = None;
+    }
 
     // Remote startup keeps its existing explicit --cd trust check. Resolving other
     // remote folders requires authoritative project-root information from the server.

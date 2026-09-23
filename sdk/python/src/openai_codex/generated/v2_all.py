@@ -43,10 +43,83 @@ class AmazonBedrockAccount(BaseModel):
     ] = False
 
 
+class AccountPool(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    accounts: Annotated[
+        list[str],
+        Field(
+            description="Ordered aliases. The order breaks quota and reset-credit ties.",
+            max_length=128,
+            min_length=1,
+        ),
+    ]
+    name: str
+    redeem_weekly_resets: Annotated[
+        bool,
+        Field(
+            alias="redeemWeeklyResets",
+            description="Use existing banked credits only when every eligible account is weekly exhausted.",
+        ),
+    ]
+
+
+class SwitchedAccountPoolEvent(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    account: str
+    previous_account: Annotated[str, Field(alias="previousAccount")]
+    type: Annotated[Literal["switched"], Field(title="SwitchedAccountPoolEventType")]
+
+
+class RedeemedAccountPoolEvent(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    account: str
+    type: Annotated[Literal["redeemed"], Field(title="RedeemedAccountPoolEventType")]
+
+
+class AccountQuotaWindow(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    limit_id: Annotated[str, Field(alias="limitId")]
+    model: str | None = None
+    remaining_percent: Annotated[float, Field(alias="remainingPercent")]
+    resets_at: Annotated[int | None, Field(alias="resetsAt")] = None
+    window_minutes: Annotated[int, Field(alias="windowMinutes")]
+
+
 class AccountRoutingOverride(Enum):
     no_constraint = "NO_CONSTRAINT"
     us = "us"
     us_cr = "us_cr"
+
+
+class AccountAccountSelection(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    name: str
+    type: Annotated[Literal["account"], Field(title="AccountAccountSelectionType")]
+
+
+class PoolAccountSelection(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    name: str
+    type: Annotated[Literal["pool"], Field(title="PoolAccountSelectionType")]
+
+
+class AccountSelection(RootModel[AccountAccountSelection | PoolAccountSelection]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: AccountAccountSelection | PoolAccountSelection
 
 
 class AccountTokenUsageDailyBucket(BaseModel):
@@ -433,6 +506,14 @@ class AutoReviewRequirements(BaseModel):
     )
     ignore_rules: Annotated[list[str] | None, Field(alias="ignoreRules")] = None
     required_on_models: Annotated[list[str] | None, Field(alias="requiredOnModels")] = None
+
+
+class BankedReset(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    expires_at: Annotated[int | None, Field(alias="expiresAt")] = None
+    id: str
 
 
 class BrowserUseAccessApprovalLifetime(Enum):
@@ -2397,6 +2478,136 @@ class LogoutAccountResponse(BaseModel):
     )
 
 
+class ManagedAccount(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    alias: str
+    email: str | None = None
+    plan: str | None = None
+    user_id: Annotated[str, Field(alias="userId")]
+    workspace_id: Annotated[str, Field(alias="workspaceId")]
+
+
+class ManagedAccountAction(Enum):
+    add = "add"
+    import_ = "import"
+    list = "list"
+    select = "select"
+    remove = "remove"
+    usage = "usage"
+    quota = "quota"
+    redeem = "redeem"
+    resolve = "resolve"
+    models = "models"
+
+
+class ManagedAccountParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    account_selection: Annotated[
+        AccountSelection | None,
+        Field(
+            alias="accountSelection",
+            description="Session selection for `resolve`; omitted selection uses saved state or the user default.",
+        ),
+    ] = None
+    action: ManagedAccountAction
+    alias: str | None = None
+    cursor: str | None = None
+    device_auth: Annotated[
+        bool | None,
+        Field(
+            alias="deviceAuth",
+            description="Use device-code login for `add`; defaults to browser OAuth.",
+        ),
+    ] = None
+    limit: Annotated[int | None, Field(ge=0)] = None
+    model: str | None = None
+    thread_id: Annotated[str | None, Field(alias="threadId")] = None
+
+
+class ApiKeyManagedAccountResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["apiKey"], Field(title="ApiKeyv2::ManagedAccountResponseType")]
+
+
+class ChatgptManagedAccountResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    auth_url: Annotated[
+        str,
+        Field(
+            alias="authUrl",
+            description="URL the client should open in a browser to initiate the OAuth flow.",
+        ),
+    ]
+    login_id: Annotated[str, Field(alias="loginId")]
+    type: Annotated[Literal["chatgpt"], Field(title="Chatgptv2::ManagedAccountResponseType")]
+
+
+class ChatgptDeviceCodeManagedAccountResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    login_id: Annotated[str, Field(alias="loginId")]
+    type: Annotated[
+        Literal["chatgptDeviceCode"], Field(title="ChatgptDeviceCodev2::ManagedAccountResponseType")
+    ]
+    user_code: Annotated[
+        str,
+        Field(alias="userCode", description="One-time code the user must enter after signing in."),
+    ]
+    verification_url: Annotated[
+        str,
+        Field(
+            alias="verificationUrl",
+            description="URL the client should open in a browser to complete device code authorization.",
+        ),
+    ]
+
+
+class ChatgptAuthTokensManagedAccountResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[
+        Literal["chatgptAuthTokens"], Field(title="ChatgptAuthTokensv2::ManagedAccountResponseType")
+    ]
+
+
+class AmazonBedrockManagedAccountResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[
+        Literal["amazonBedrock"], Field(title="AmazonBedrockv2::ManagedAccountResponseType")
+    ]
+
+
+class ManagedAccountUsage(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    account: ManagedAccount
+    available_resets: Annotated[int | None, Field(alias="availableResets")] = None
+    checked_at: Annotated[int, Field(alias="checkedAt")]
+    error: str | None = None
+    model: str | None = None
+    model_supported: Annotated[bool | None, Field(alias="modelSupported")] = None
+    ordinary_usage_allowed: Annotated[bool | None, Field(alias="ordinaryUsageAllowed")] = None
+    pools: list[str]
+    resets: Annotated[
+        list[BankedReset] | None,
+        Field(description="Null means details are unknown, including failed reads."),
+    ] = None
+    windows: list[AccountQuotaWindow]
+
+
 class ManagedHooksRequirements(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -2417,6 +2628,35 @@ class ManagedHooksRequirements(BaseModel):
     user_prompt_submit: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="UserPromptSubmit")]
     managed_dir: Annotated[str | None, Field(alias="managedDir")] = None
     windows_managed_dir: Annotated[str | None, Field(alias="windowsManagedDir")] = None
+
+
+class ManagedPoolAction(Enum):
+    create = "create"
+    list = "list"
+    read = "read"
+    update = "update"
+    select = "select"
+    remove = "remove"
+
+
+class ManagedPoolParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    action: ManagedPoolAction
+    cursor: str | None = None
+    limit: Annotated[int | None, Field(ge=0)] = None
+    name: str | None = None
+    pool: AccountPool | None = None
+
+
+class ManagedPoolResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    data: list[AccountPool]
+    default_selection: Annotated[AccountSelection | None, Field(alias="defaultSelection")] = None
+    next_cursor: Annotated[str | None, Field(alias="nextCursor")] = None
 
 
 class MarketplaceAddParams(BaseModel):
@@ -3538,6 +3778,13 @@ class PluginsMigration(BaseModel):
     )
     marketplace_name: Annotated[str, Field(alias="marketplaceName")]
     plugin_names: Annotated[list[str], Field(alias="pluginNames")]
+
+
+class PoolWaitReason(Enum):
+    unknown_availability = "unknownAvailability"
+    short_window = "shortWindow"
+    weekly_quota = "weeklyQuota"
+    redemption_pending = "redemptionPending"
 
 
 class ProcessExitedNotification(BaseModel):
@@ -5867,6 +6114,7 @@ class ThreadResumeParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    account_selection: Annotated[AccountSelection | None, Field(alias="accountSelection")] = None
     approval_policy: Annotated[AskForApproval | None, Field(alias="approvalPolicy")] = None
     approvals_reviewer: Annotated[
         ApprovalsReviewer | None,
@@ -6619,6 +6867,43 @@ class AccountLoginCompletedNotification(BaseModel):
         DesktopOnboardingEntrypoint | None, Field(alias="onboardingEntrypoint")
     ] = None
     success: bool
+
+
+class SelectedAccountPoolEvent(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    account: ManagedAccount
+    type: Annotated[Literal["selected"], Field(title="SelectedAccountPoolEventType")]
+
+
+class WaitingAccountPoolEvent(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    account: str
+    next_check_at: Annotated[int, Field(alias="nextCheckAt")]
+    reason: PoolWaitReason
+    type: Annotated[Literal["waiting"], Field(title="WaitingAccountPoolEventType")]
+
+
+class AccountPoolEvent(
+    RootModel[
+        SelectedAccountPoolEvent
+        | SwitchedAccountPoolEvent
+        | RedeemedAccountPoolEvent
+        | WaitingAccountPoolEvent
+    ]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: (
+        SelectedAccountPoolEvent
+        | SwitchedAccountPoolEvent
+        | RedeemedAccountPoolEvent
+        | WaitingAccountPoolEvent
+    )
 
 
 class AccountUpdatedNotification(BaseModel):
@@ -7470,6 +7755,24 @@ class AccountRateLimitsReadRequest(BaseModel):
         Literal["account/rateLimits/read"], Field(title="Account/rateLimits/readRequestMethod")
     ]
     params: GetAccountRateLimitsParams | None = None
+
+
+class AccountManageRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[Literal["account/manage"], Field(title="Account/manageRequestMethod")]
+    params: ManagedAccountParams
+
+
+class PoolManageRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[Literal["pool/manage"], Field(title="Pool/manageRequestMethod")]
+    params: ManagedPoolParams
 
 
 class AccountRateLimitResetCreditConsumeRequest(BaseModel):
@@ -8514,6 +8817,15 @@ class LoginAccountParams(
         | AmazonBedrockAccessKeysLoginAccountParams,
         Field(title="LoginAccountParams"),
     ]
+
+
+class RequiresOpenaiAuthManagedAccountResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    account: Account | None = None
+    requires_openai_auth: Annotated[bool, Field(alias="requiresOpenaiAuth")]
+    workspace_routing: Annotated[WorkspaceRouting | None, Field(alias="workspaceRouting")] = None
 
 
 class McpResourceReadParams(BaseModel):
@@ -9686,10 +9998,19 @@ class SubAgentSource(
     root: SubAgentSourceValue | ThreadSpawnSubAgentSource | OtherSubAgentSource
 
 
+class ThreadAccountPoolNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    event: AccountPoolEvent
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
 class ThreadForkParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    account_selection: Annotated[AccountSelection | None, Field(alias="accountSelection")] = None
     approval_policy: Annotated[AskForApproval | None, Field(alias="approvalPolicy")] = None
     approvals_reviewer: Annotated[
         ApprovalsReviewer | None,
@@ -10183,6 +10504,20 @@ class ThreadStartParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    account_selection: Annotated[
+        AccountSelection | None,
+        Field(
+            alias="accountSelection",
+            description="Session-local selection of a server-managed ChatGPT account or pool.",
+        ),
+    ] = None
+    account_selection_source_thread_id: Annotated[
+        str | None,
+        Field(
+            alias="accountSelectionSourceThreadId",
+            description="Inherit the managed account and pool from an existing conversation. An explicit `accountSelection` takes precedence. This does not copy conversation history.",
+        ),
+    ] = None
     approval_policy: Annotated[AskForApproval | None, Field(alias="approvalPolicy")] = None
     approvals_reviewer: Annotated[
         ApprovalsReviewer | None,
@@ -10869,6 +11204,43 @@ class ListMcpServerStatusResponse(BaseModel):
     ] = None
 
 
+class ManagedAccountResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    data: list[ManagedAccount]
+    default_selection: Annotated[AccountSelection | None, Field(alias="defaultSelection")] = None
+    login: (
+        ApiKeyManagedAccountResponse
+        | ChatgptManagedAccountResponse
+        | ChatgptDeviceCodeManagedAccountResponse
+        | ChatgptAuthTokensManagedAccountResponse
+        | AmazonBedrockManagedAccountResponse
+        | None
+    ) = None
+    models: list[Model] | None = None
+    next_cursor: Annotated[str | None, Field(alias="nextCursor")] = None
+    resolved: Annotated[
+        RequiresOpenaiAuthManagedAccountResponse | None,
+        Field(description="Null means this selection uses legacy authentication."),
+    ] = None
+    selected_account: Annotated[
+        ManagedAccount | None,
+        Field(
+            alias="selectedAccount",
+            description="Identity selected by `resolve` or `models`, without credentials.",
+        ),
+    ] = None
+    selected_pool: Annotated[
+        AccountPool | None,
+        Field(
+            alias="selectedPool",
+            description="Session pool membership and policy for `resolve` or `models`; null for single accounts.",
+        ),
+    ] = None
+    usage: list[ManagedAccountUsage]
+
+
 class ModelsRequirements(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11185,6 +11557,24 @@ class AccountRateLimitsUpdatedServerNotification(BaseModel):
         Field(title="Account/rateLimits/updatedNotificationMethod"),
     ]
     params: AccountRateLimitsUpdatedNotification
+
+
+class ThreadAccountPoolUpdatedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["thread/accountPool/updated"],
+        Field(title="Thread/accountPool/updatedNotificationMethod"),
+    ]
+    params: ThreadAccountPoolNotification
 
 
 class AppListUpdatedServerNotification(BaseModel):
@@ -12527,6 +12917,8 @@ class ClientRequest(
         | AccountLoginCancelRequest
         | AccountLogoutRequest
         | AccountRateLimitsReadRequest
+        | AccountManageRequest
+        | PoolManageRequest
         | AccountRateLimitResetCreditConsumeRequest
         | AccountUsageReadRequest
         | AccountWorkspaceMessagesReadRequest
@@ -12637,6 +13029,8 @@ class ClientRequest(
         | AccountLoginCancelRequest
         | AccountLogoutRequest
         | AccountRateLimitsReadRequest
+        | AccountManageRequest
+        | PoolManageRequest
         | AccountRateLimitResetCreditConsumeRequest
         | AccountUsageReadRequest
         | AccountWorkspaceMessagesReadRequest
@@ -12881,6 +13275,7 @@ class ServerNotification(
         | AccountUpdatedServerNotification
         | AccountGatewayOAuthChangedServerNotification
         | AccountRateLimitsUpdatedServerNotification
+        | ThreadAccountPoolUpdatedServerNotification
         | AppListUpdatedServerNotification
         | RemoteControlStatusChangedServerNotification
         | ExternalAgentConfigImportProgressServerNotification
@@ -12970,6 +13365,7 @@ class ServerNotification(
         | AccountUpdatedServerNotification
         | AccountGatewayOAuthChangedServerNotification
         | AccountRateLimitsUpdatedServerNotification
+        | ThreadAccountPoolUpdatedServerNotification
         | AppListUpdatedServerNotification
         | RemoteControlStatusChangedServerNotification
         | ExternalAgentConfigImportProgressServerNotification

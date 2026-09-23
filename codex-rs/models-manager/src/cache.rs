@@ -120,6 +120,15 @@ impl fmt::Display for ModelsCacheError {
 
 impl std::error::Error for ModelsCacheError {}
 
+/// A file-backed catalog cache at a caller-chosen path, for catalogs that must stay separate per
+/// tenant (for example one per locally managed account).
+pub fn file_models_cache(
+    cache_path: PathBuf,
+    cache_ttl: Duration,
+) -> std::sync::Arc<dyn ModelsCache> {
+    std::sync::Arc::new(FileModelsCache::new(cache_path, cache_ttl))
+}
+
 /// Built-in file-backed model catalog cache.
 #[derive(Debug)]
 pub(crate) struct FileModelsCache {
@@ -240,7 +249,20 @@ async fn save_file(cache_path: &PathBuf, cache: &ModelsCacheEntry) -> Result<(),
         fs::create_dir_all(parent).await.map_err(cache_error)?;
     }
     let json = serde_json::to_vec_pretty(cache).map_err(cache_error)?;
-    fs::write(cache_path, json).await.map_err(cache_error)
+    // Concurrent sessions may share one cache file; replace it atomically so a reader never
+    // sees a torn write.
+    let mut temp_name = cache_path
+        .file_name()
+        .map(std::ffi::OsStr::to_os_string)
+        .unwrap_or_default();
+    temp_name.push(format!(".{}.tmp", std::process::id()));
+    let temp_path = cache_path.with_file_name(temp_name);
+    fs::write(&temp_path, json).await.map_err(cache_error)?;
+    if let Err(error) = fs::rename(&temp_path, cache_path).await {
+        let _ = fs::remove_file(&temp_path).await;
+        return Err(cache_error(error));
+    }
+    Ok(())
 }
 
 fn cache_error(error: impl fmt::Display) -> ModelsCacheError {

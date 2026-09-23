@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::time::Instant;
+use tokio_util::sync::CancellationToken;
 
 use crate::Prompt;
 use crate::client::ModelClientSession;
@@ -112,6 +113,7 @@ pub(crate) async fn run_inline_auto_compact_task(
     initial_context_injection: InitialContextInjection,
     reason: CompactionReason,
     phase: CompactionPhase,
+    cancellation: &CancellationToken,
 ) -> CodexResult<()> {
     let prompt = turn_context
         .config
@@ -133,6 +135,7 @@ pub(crate) async fn run_inline_auto_compact_task(
         CompactionTrigger::Auto,
         reason,
         phase,
+        cancellation,
     )
     .await?;
     Ok(())
@@ -142,6 +145,7 @@ pub(crate) async fn run_compact_task(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
     input: Vec<UserInput>,
+    cancellation: &CancellationToken,
 ) -> CodexResult<()> {
     sess.emit_turn_started(&turn_context).await;
     run_compact_task_inner(
@@ -152,11 +156,16 @@ pub(crate) async fn run_compact_task(
         CompactionTrigger::Manual,
         CompactionReason::UserRequested,
         CompactionPhase::StandaloneTurn,
+        cancellation,
     )
     .await?;
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Compaction must carry the running turn cancellation token through its existing request boundary"
+)]
 async fn run_compact_task_inner(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
@@ -165,6 +174,7 @@ async fn run_compact_task_inner(
     trigger: CompactionTrigger,
     reason: CompactionReason,
     phase: CompactionPhase,
+    cancellation: &CancellationToken,
 ) -> CodexResult<()> {
     let compaction_metadata =
         CompactionTurnMetadata::new(trigger, reason, CompactionImplementation::Responses, phase);
@@ -199,6 +209,7 @@ async fn run_compact_task_inner(
         input,
         initial_context_injection,
         compaction_metadata,
+        cancellation,
     )
     .await;
     let status = compaction_status_from_result(&result);
@@ -248,6 +259,7 @@ async fn run_compact_task_inner_impl(
     input: Vec<UserInput>,
     initial_context_injection: InitialContextInjection,
     compaction_metadata: CompactionTurnMetadata,
+    cancellation: &CancellationToken,
 ) -> CodexResult<String> {
     let compaction_item = TurnItem::ContextCompaction(ContextCompactionItem::new());
     sess.emit_turn_item_started(&turn_context, &compaction_item)
@@ -265,6 +277,14 @@ async fn run_compact_task_inner_impl(
     // Reuse one client session so turn-scoped state (sticky routing and websocket incremental
     // request tracking) survives retries within this compact turn.
     let mut client_session = sess.services.model_client.new_session();
+    crate::account_pools::before_request(
+        &sess,
+        &turn_context,
+        &turn_context.model_info().slug,
+        &mut client_session,
+        cancellation,
+    )
+    .await?;
     let compaction_response = loop {
         // Clone is required because of the loop
         let mut turn_input = history
@@ -295,6 +315,7 @@ async fn run_compact_task_inner_impl(
 
         match attempt_result {
             Ok(response) => {
+                crate::account_pools::record_success(&sess).await;
                 break response;
             }
             Err(err)
@@ -320,6 +341,20 @@ async fn run_compact_task_inner_impl(
                 }
                 sess.set_total_tokens_full(turn_context.as_ref()).await;
                 return Err(e);
+            }
+            Err(e) if matches!(e.details(), CodexErrorDetails::UsageLimitReached(_)) => {
+                crate::account_pools::note_quota_rejection(&sess).await;
+                if !crate::account_pools::recover(
+                    &sess,
+                    &turn_context,
+                    &turn_context.model_info().slug,
+                    &mut client_session,
+                    cancellation,
+                )
+                .await?
+                {
+                    return Err(e);
+                }
             }
             Err(e) => {
                 if retries < max_retries {

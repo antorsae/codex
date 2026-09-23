@@ -1,0 +1,25 @@
+---
+source: tui/src/history_cell/account_pools_tests.rs
+expression: "render(&report, 110)"
+---
+Accounts (1)
+
+Default for new sessions: account acct1
+
+ Alias    Email            Plan    Weekly left    Reset in    Available resets
+━━━━━━━  ━━━━━━━━━━━━━━━  ━━━━━━  ━━━━━━━━━━━━━  ━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━
+ acct1    a@example.com    pro     66%            3d 4h       0
+
+Refresh with /accounts for current usage and banked resets.
+
+acct1 · Workspace ID: 00000000-0000-0000-0000-000000000001
+
+Pools: work · Checked: 2027-01-15 08:00 UTC
+
+ Limit          Window       Left    Reset in    Resets at
+━━━━━━━━━━━━━  ━━━━━━━━━━━  ━━━━━━  ━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━
+ codex_other    10080 min    12%     1h          2027-01-15 09:00 UTC
+─────────────  ───────────  ──────  ──────────  ──────────────────────
+ codex          300 min      80%     2h          2027-01-15 10:00 UTC
+─────────────  ───────────  ──────  ──────────  ──────────────────────
+ codex          10080 min    66%     3d 4h       2027-01-18 12:00 UTC

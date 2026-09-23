@@ -9,19 +9,28 @@ use crate::text_formatting::truncate_text;
 impl ChatWidget {
     pub(super) fn show_copy_picker(&mut self) {
         let mut choices = Vec::new();
-        if let Some(status_targets) = &self.transcript.last_status_copy_targets {
-            choices.push((
-                "Whole status".to_string(),
-                Arc::<str>::from(status_targets.handle.copy_text()),
-                CopyFormat::PlainText,
-            ));
-            choices.extend(
-                status_targets
-                    .fields
-                    .iter()
-                    .cloned()
-                    .map(|(label, text)| (label, text, CopyFormat::PlainText)),
-            );
+        if let Some(source) = &self.transcript.last_command_copy_source {
+            match source {
+                super::transcript::CommandCopySource::AccountPool(markdown) => choices.push((
+                    "Whole report".to_owned(),
+                    Arc::from(markdown.as_str()),
+                    CopyFormat::Markdown,
+                )),
+                super::transcript::CommandCopySource::Status(status_targets) => {
+                    choices.push((
+                        "Whole status".to_string(),
+                        Arc::<str>::from(status_targets.handle.copy_text()),
+                        CopyFormat::PlainText,
+                    ));
+                    choices.extend(
+                        status_targets
+                            .fields
+                            .iter()
+                            .cloned()
+                            .map(|(label, text)| (label, text, CopyFormat::PlainText)),
+                    );
+                }
+            }
         } else if let Some(markdown) = self
             .transcript
             .last_agent_markdown

@@ -101,6 +101,7 @@ use url::Url;
 
 const RAW_DIFF_SUMMARY_WIDTH: usize = 10_000;
 
+mod account_pools;
 mod activity_details;
 pub(crate) mod activity_preview;
 mod approvals;
@@ -122,6 +123,8 @@ mod spoken_artifacts;
 mod startup_warnings;
 mod warnings;
 
+pub(crate) use account_pools::AccountPoolReport;
+pub(crate) use account_pools::AccountReportView;
 pub(crate) use activity_details::ActivityDetails;
 pub(crate) use activity_preview::ActivityDisclosure;
 pub(crate) use approvals::*;

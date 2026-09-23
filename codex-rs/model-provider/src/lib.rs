@@ -41,3 +41,4 @@ pub use provider::create_model_provider;
 #[cfg(test)]
 #[path = "workspace_routing_tests.rs"]
 mod workspace_routing_tests;
+pub use provider::provider_uses_first_party_auth_path;

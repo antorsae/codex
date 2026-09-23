@@ -238,6 +238,8 @@ async fn new_config(
     let mut config = Config {
         application_network_policy: Default::default(),
         application_auth_route_config: Some(auth_config.auth_route_config.clone()),
+        account_selection: None,
+        account_selection_source_thread_id: None,
         config_layer_stack,
         startup_warnings: Vec::new(),
         bypass_hook_trust: false,

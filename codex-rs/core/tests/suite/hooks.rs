@@ -2002,6 +2002,11 @@ async fn async_hook_finishing_while_idle_waits_for_the_next_turn(
     })
     .await
     .context("timed out waiting for the next turn to complete")??;
+    fs::write(
+        test.codex_home_path()
+            .join("async_user_prompt_submit_release"),
+        "ready",
+    )?;
 
     let requests = responses.requests();
     assert_eq!(requests.len(), 2);

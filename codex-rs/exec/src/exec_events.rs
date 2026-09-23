@@ -9,6 +9,8 @@ use ts_rs::TS;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(tag = "type")]
 pub enum ThreadEvent {
+    #[serde(rename = "account.pool.updated")]
+    AccountPool(AccountPoolUpdate),
     /// Emitted when a new thread is started as the first event.
     #[serde(rename = "thread.started")]
     ThreadStarted(ThreadStartedEvent),
@@ -34,6 +36,12 @@ pub enum ThreadEvent {
     /// Represents an unrecoverable error emitted directly by the event stream.
     #[serde(rename = "error")]
     Error(ThreadErrorEvent),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+pub struct AccountPoolUpdate {
+    pub thread_id: String,
+    pub event: codex_protocol::account_pool::AccountPoolEvent,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]

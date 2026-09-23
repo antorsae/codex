@@ -141,7 +141,7 @@ pub(crate) struct MessageProcessor {
     pub(crate) turn_admission: TurnAdmission,
     user_verification: Arc<crate::user_verification::Service>,
     outgoing: Arc<OutgoingMessageSender>,
-    models_refresh_worker: ModelsRefreshWorker,
+    models_refresh_worker: Option<ModelsRefreshWorker>,
     turn_cost_worker: Option<TurnCostWorker>,
     skills_watcher: Arc<SkillsWatcher>,
     account_processor: Arc<AccountRequestProcessor>,
@@ -379,7 +379,13 @@ impl MessageProcessor {
             Arc::clone(&config),
             thread_manager.get_models_manager(),
         ));
-        let models_refresh_worker = crate::models_refresh_worker::spawn(&model_catalog);
+        // Pooled sessions keep per-account catalogs; the legacy login is not polled for them.
+        let managed_selection = config.account_selection.is_some()
+            || codex_account_pools::AccountStore::from_config(config.as_ref())
+                .read()
+                .is_ok_and(|accounts| accounts.default_selection.is_some());
+        let models_refresh_worker =
+            (!managed_selection).then(|| crate::models_refresh_worker::spawn(&model_catalog));
         let turn_cost_worker =
             TurnCostWorker::spawn(Arc::clone(&config), Arc::clone(&auth_manager));
         thread_manager
@@ -618,7 +624,9 @@ impl MessageProcessor {
     pub(crate) fn clear_runtime_references(&self) {
         self.account_processor.clear_external_auth();
         self.apps_processor.shutdown();
-        self.models_refresh_worker.shutdown();
+        if let Some(worker) = &self.models_refresh_worker {
+            worker.shutdown();
+        }
         self.skills_watcher.shutdown();
     }
 
@@ -842,7 +850,9 @@ impl MessageProcessor {
     }
 
     pub(crate) async fn drain_background_tasks(&self) {
-        self.models_refresh_worker.shutdown();
+        if let Some(worker) = &self.models_refresh_worker {
+            worker.shutdown();
+        }
         if let Some(worker) = &self.turn_cost_worker {
             worker.shutdown();
         }
@@ -1780,6 +1790,12 @@ impl MessageProcessor {
             }
             ClientRequest::GetAccountRateLimits { params, .. } => {
                 self.account_processor.get_account_rate_limits(params).await
+            }
+            ClientRequest::ManagedAccount { params, .. } => {
+                self.account_processor.managed_account(params).await
+            }
+            ClientRequest::ManagedPool { params, .. } => {
+                self.account_processor.managed_pool(params).await
             }
             ClientRequest::ConsumeAccountRateLimitResetCredit { params, .. } => {
                 self.account_processor

@@ -11663,6 +11663,7 @@ async fn remote_compaction_v2_retains_only_the_selected_step(first_attempt: Firs
         InitialContextInjection::DoNotInject,
         CompactionReason::ModelDownshift,
         CompactionPhase::PreTurn,
+        &CancellationToken::new(),
     )
     .await
     .expect("compaction succeeds");

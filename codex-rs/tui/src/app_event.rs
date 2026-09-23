@@ -280,6 +280,24 @@ pub(crate) enum AppEvent {
     OpenDaemonMenu,
     ConfirmDaemonUpdate(crate::update_action::DaemonUpdateSource),
     RunDaemonUpdate(crate::update_action::DaemonUpdateSource),
+    ManagedAccounts {
+        args: String,
+    },
+    ManagedPools {
+        args: String,
+    },
+    ManagedAccountOutput {
+        result: Result<crate::history_cell::AccountPoolReport, String>,
+    },
+    RefreshAccountStatus {
+        request_id: Uuid,
+        thread_id: ThreadId,
+        include_pool_usage: bool,
+    },
+    AccountStatusLoaded {
+        request_id: Uuid,
+        result: Result<crate::chatwidget::AccountStatusSnapshot, String>,
+    },
     ReviewMisalignment(Arc<crate::chatwidget::MisalignmentReview>),
     ContinueMisalignment(Arc<crate::chatwidget::MisalignmentReview>),
     CloseMisalignmentReview,

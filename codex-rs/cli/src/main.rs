@@ -50,6 +50,7 @@ use supports_color::Stream;
 #[global_allocator]
 static ALLOCATOR: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
+mod account_cmd;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod app_cmd;
 mod cloud_config;
@@ -141,6 +142,10 @@ struct MultitoolCli {
 
 #[derive(Debug, clap::Subcommand)]
 enum Subcommand {
+    /// Manage named local ChatGPT subscriptions.
+    Account(account_cmd::AccountCli),
+    /// Manage ordered account pools and automatic quota recovery.
+    Pool(account_cmd::PoolCli),
     /// Browse all agent sessions on the shared local app-server daemon.
     Agents(AgentsCommand),
 
@@ -1131,6 +1136,8 @@ async fn cli_main(
         Some(Subcommand::TcpTunnel(args)) => {
             return codex_tcp_tunnel::run(args).await;
         }
+        Some(Subcommand::Account(command)) => command.run(root_config_overrides).await?,
+        Some(Subcommand::Pool(command)) => command.run(root_config_overrides).await?,
         Some(Subcommand::Exec(mut exec_cli)) => {
             reject_remote_mode_for_subcommand(
                 root_remote.as_deref(),
@@ -2264,6 +2271,8 @@ fn unsupported_subcommand_name_for_strict_config(
         Some(Subcommand::StdioToUds(_)) => Some("stdio-to-uds"),
         Some(Subcommand::Features(_)) => Some("features"),
         Some(Subcommand::TcpTunnel(_)) => Some("tcp-tunnel"),
+        Some(Subcommand::Account(_)) => Some("account"),
+        Some(Subcommand::Pool(_)) => Some("pool"),
     }
 }
 

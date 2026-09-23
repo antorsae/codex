@@ -362,10 +362,19 @@ impl ChatWidget {
         false
     }
 
-    /// Capture the last response for the app to copy before processing another key.
+    /// Capture the latest account/pool report or response for the app to copy before processing
+    /// another key.
     pub(super) fn prepare_last_response_copy(&mut self) -> KeyEventAction {
         self.app_event_tx.send(AppEvent::FollowTranscript);
-        let action = match self.transcript.last_agent_markdown.as_deref() {
+        let markdown = match &self.transcript.last_command_copy_source {
+            Some(super::transcript::CommandCopySource::AccountPool(markdown)) => {
+                Some(markdown.as_str())
+            }
+            Some(super::transcript::CommandCopySource::Status(_)) | None => {
+                self.transcript.last_agent_markdown.as_deref()
+            }
+        };
+        let action = match markdown {
             Some(markdown) if !markdown.is_empty() => {
                 KeyEventAction::CopyLastResponse(markdown.into())
             }

@@ -135,7 +135,8 @@ pub(crate) fn without_notification_media(notification: ServerNotification) -> Se
         | ServerNotification::WindowsWorldWritableWarning(_)
         | ServerNotification::WindowsSandboxSetupCompleted(_)
         | ServerNotification::AccountLoginCompleted(_)
-        | ServerNotification::GatewayOAuthChanged(_) => notification,
+        | ServerNotification::GatewayOAuthChanged(_)
+        | ServerNotification::ThreadAccountPool(_) => notification,
     }
 }
 

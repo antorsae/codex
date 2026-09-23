@@ -23,6 +23,23 @@ struct Error {
 }
 
 pub(super) fn parse_failed_response(response: Option<Value>) -> ApiError {
+    if let Some(error) = response.as_ref().and_then(|response| response.get("error"))
+        && [error.get("type"), error.get("code")]
+            .into_iter()
+            .flatten()
+            .any(|value| value.as_str() == Some("usage_limit_reached"))
+    {
+        // Use the same quota-error decoding as HTTP and WebSocket failures.
+        let mut error = error.clone();
+        error["type"] = Value::String("usage_limit_reached".to_owned());
+        return ApiError::Transport(codex_client::TransportError::Http {
+            status: http::StatusCode::TOO_MANY_REQUESTS,
+            url: None,
+            headers: None,
+            body: Some(serde_json::json!({ "error": error }).to_string()),
+            retry_after: None,
+        });
+    }
     if let Some(error) = response
         .as_ref()
         .and_then(|response| response.get("error"))

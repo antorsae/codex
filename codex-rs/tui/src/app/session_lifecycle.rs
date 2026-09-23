@@ -506,6 +506,8 @@ impl App {
         }
         chat_widget.remote_connection = self.chat_widget.remote_connection.clone();
         chat_widget.snapshot_local_images = self.app_server_target.uses_remote_workspace();
+        // A replacement widget must not re-arm the legacy periodic usage poll for a pooled session.
+        chat_widget.managed_accounts_active |= self.chat_widget.managed_accounts_active;
         chat_widget.set_local_worktree_operations(self.chat_widget.local_worktree_operations);
         chat_widget.windows_sandbox_local_server = self.chat_widget.windows_sandbox_local_server;
         chat_widget.windows_sandbox_host = WindowsSandboxHost::Unknown;
@@ -980,6 +982,8 @@ impl App {
             &self.cli_kv_overrides,
             &self.harness_overrides,
         );
+        config.account_selection_source_thread_id =
+            self.chat_widget.thread_id().map(|id| id.to_string());
         match app_server
             .start_thread_with_session_start_source(
                 &self.local_settings,
@@ -1008,6 +1012,7 @@ impl App {
                     Some(started.session.thread_id),
                 )
                 .await;
+                config.account_selection_source_thread_id = None;
                 self.local_settings = self.local_settings.reloaded(&config);
                 self.refresh_server_version_overview_notice(CODEX_CLI_VERSION);
                 self.config = config;
