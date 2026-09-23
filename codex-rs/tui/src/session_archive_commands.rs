@@ -382,6 +382,7 @@ pub(super) async fn start_app_server_for_session_command(
         &mut state_db,
         environment_manager,
         embedded_network_policy,
+        super::NamedAccounts::NotUsed,
     )
     .await?;
     Ok(

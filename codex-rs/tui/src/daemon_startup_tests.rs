@@ -2,8 +2,15 @@
 
 use super::*;
 use crate::legacy_core::config::ConfigBuilder;
+use codex_app_server_protocol::JSONRPCMessage;
+use futures::SinkExt;
+use futures::StreamExt;
 use pretty_assertions::assert_eq;
+use serde_json::json;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use tempfile::TempDir;
+use tokio_tungstenite::tungstenite::Message;
 
 #[test]
 fn audited_overrides_allow_daemon_without_allowing_arbitrary_config() {
@@ -322,6 +329,7 @@ async fn daemon_startup_falls_back_only_for_implicit_endpoints() -> color_eyre::
             &mut state_db,
             Arc::new(EnvironmentManager::default_for_tests()),
             Default::default(),
+            NamedAccounts::Required,
         )
         .await;
         reject_handshake.abort();
@@ -439,4 +447,103 @@ fn daemon_exclusion_warning_snapshot() {
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!("daemon_exclusion_warning", text);
+}
+
+/// A daemon started by a Codex build without named accounts, such as the one a desktop app boots
+/// over SSH, answers `account/manage` with a request parse error. This TUI's pools live in the
+/// app-server, so only an implicitly discovered daemon is swapped for the embedded server.
+#[tokio::test]
+async fn implicit_daemon_without_named_accounts_is_replaced_by_the_embedded_server()
+-> color_eyre::Result<()> {
+    for scenario in [
+        "implicit stock daemon",
+        "implicit daemon with accounts",
+        "explicit stock endpoint",
+    ] {
+        let home = TempDir::new()?;
+        let config = ConfigBuilder::default()
+            .codex_home(home.path().to_path_buf())
+            .build()
+            .await?;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let endpoint = RemoteAppServerEndpoint::WebSocket {
+            websocket_url: format!("ws://{}", listener.local_addr()?),
+            auth_token: None,
+        };
+        let supports_accounts = scenario == "implicit daemon with accounts";
+        let probed = Arc::new(AtomicBool::new(false));
+        let observed = Arc::clone(&probed);
+        let daemon = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await?;
+            let mut socket = tokio_tungstenite::accept_async(stream).await?;
+            while let Some(Ok(Message::Text(text))) = socket.next().await {
+                let JSONRPCMessage::Request(request) = serde_json::from_str(&text)? else {
+                    continue;
+                };
+                let mut reply = match request.method.as_str() {
+                    "initialize" => json!({"result":{"userAgent":"daemon-test/1.0.0"}}),
+                    "account/manage" => {
+                        observed.store(/*val*/ true, Ordering::Relaxed);
+                        if supports_accounts {
+                            json!({"result":{
+                                "resolved": null, "models": null, "data": [], "nextCursor": null,
+                                "usage": [], "login": null, "defaultSelection": null,
+                            }})
+                        } else {
+                            json!({"error":{"code":-32600,"message":"Invalid request: unknown variant `account/manage`, expected one of `initialize`, `account/read`"}})
+                        }
+                    }
+                    method => panic!("unexpected request: {method}"),
+                };
+                reply["id"] = json!(request.id);
+                socket.send(Message::Text(reply.to_string().into())).await?;
+            }
+            Ok::<_, color_eyre::Report>(())
+        });
+        let mut target = if scenario == "explicit stock endpoint" {
+            AppServerTarget::Remote { endpoint }
+        } else {
+            AppServerTarget::LocalDaemon {
+                endpoint,
+                allow_embedded_fallback: true,
+            }
+        };
+        let original_target = target.clone();
+        let mut state_db = None;
+        let app_server = start_app_server(
+            &mut target,
+            Arg0DispatchPaths::default(),
+            config,
+            Vec::new(),
+            LoaderOverrides::default(),
+            /*strict_config*/ false,
+            CloudConfigBundleLoader::default(),
+            codex_feedback::CodexFeedback::new(),
+            /*log_db*/ None,
+            &mut state_db,
+            Arc::new(EnvironmentManager::default_for_tests()),
+            codex_app_server_client::EmbeddedNetworkPolicy::default(),
+            NamedAccounts::Required,
+        )
+        .await?;
+        let server = AppServerSession::new(app_server, target.thread_params_mode());
+        if scenario == "implicit stock daemon" {
+            assert!(server.uses_embedded_app_server(), "{scenario}");
+            assert_eq!(target, AppServerTarget::Embedded, "{scenario}");
+            assert!(state_db.is_some(), "{scenario}");
+        } else {
+            assert!(!server.uses_embedded_app_server(), "{scenario}");
+            assert_eq!(target, original_target, "{scenario}");
+            assert!(state_db.is_none(), "{scenario}");
+        }
+        // An explicit endpoint is authoritative, so it is never probed.
+        assert_eq!(
+            probed.load(Ordering::Relaxed),
+            scenario != "explicit stock endpoint",
+            "{scenario}"
+        );
+        server.shutdown().await?;
+        daemon.await??;
+    }
+    Ok(())
 }

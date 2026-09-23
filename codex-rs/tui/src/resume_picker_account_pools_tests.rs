@@ -27,7 +27,9 @@ async fn account_pool_picker_cancellation_returns_reusable_session_after_stalled
                     let _ = started_tx.take().unwrap().send(());
                     continue;
                 }
-                "account/manage" => json!({"error":{"code":-32601,"message":"Unknown method"}}),
+                "account/manage" => {
+                    json!({"error":{"code":-32600,"message":"Invalid request: unknown variant `account/manage`, expected one of `initialize`, `account/read`"}})
+                }
                 "account/read" => json!({"result":{"account":null,"requiresOpenaiAuth":false}}),
                 method => panic!("unexpected request: {method}"),
             };

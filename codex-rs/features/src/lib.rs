@@ -944,7 +944,9 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::DaemonAutoStart,
         key: "daemon_auto_start",
         stage: Stage::Stable,
-        default_enabled: true,
+        // Named accounts need this build's own app-server; an auto-started daemon runs a
+        // separately installed build without them, so it is opt-in here.
+        default_enabled: false,
     },
     FeatureSpec {
         id: Feature::TranscriptV2,

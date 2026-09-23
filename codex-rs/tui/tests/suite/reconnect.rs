@@ -93,6 +93,12 @@ async fn automatic_reconnect_restores_draft_and_routes_new_notifications() -> Re
                         "enabled": true, "defaultEnabled": true,
                     }))), "nextCursor": null})
                     }
+                    // This fork probes a discovered daemon for named accounts and replaces
+                    // one without them, so the fake daemon answers like a fork build.
+                    "account/manage" => json!({
+                        "resolved": null, "models": null, "data": [], "nextCursor": null,
+                        "usage": [], "login": null, "defaultSelection": null,
+                    }),
                     "account/read" => {
                         json!({"account": {"type": "apiKey"}, "requiresOpenaiAuth": false})
                     }

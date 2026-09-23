@@ -35,10 +35,16 @@ use codex_app_server_client::InProcessClientStartArgs;
 use codex_app_server_client::RemoteAppServerClient;
 use codex_app_server_client::RemoteAppServerConnectArgs;
 pub use codex_app_server_client::RemoteAppServerEndpoint;
+use codex_app_server_client::TypedRequestError;
 use codex_app_server_protocol::Account as AppServerAccount;
 use codex_app_server_protocol::AskForApproval;
+use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ConfigWarningNotification;
 use codex_app_server_protocol::GetAccountResponse;
+use codex_app_server_protocol::ManagedAccountAction;
+use codex_app_server_protocol::ManagedAccountParams;
+use codex_app_server_protocol::ManagedAccountResponse;
+use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::Thread as AppServerThread;
 #[cfg(test)]
 use codex_app_server_protocol::ThreadListCwdFilter;
@@ -505,6 +511,42 @@ async fn connect_remote_app_server(
     Ok(AppServerClient::Remote(app_server))
 }
 
+/// Whether a started app server must serve this build's named accounts and pools.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NamedAccounts {
+    /// Sessions may run on named accounts, so a daemon without them is replaced.
+    Required,
+    /// Commands on existing threads, such as queueing, use whichever server owns them.
+    NotUsed,
+}
+
+/// Whether an implicitly discovered daemon can serve this TUI's named accounts and pools.
+///
+/// Listing is a local read on servers that support it. Only a definite "unsupported" answer
+/// counts, so other failures still surface through the normal startup path.
+async fn local_daemon_supports_managed_accounts(app_server: &AppServerClient) -> bool {
+    let response: Result<ManagedAccountResponse, TypedRequestError> = app_server
+        .request_typed(ClientRequest::ManagedAccount {
+            request_id: RequestId::String(format!("daemon-accounts-probe-{}", Uuid::new_v4())),
+            params: ManagedAccountParams {
+                action: ManagedAccountAction::List,
+                account_selection: None,
+                thread_id: None,
+                alias: None,
+                device_auth: None,
+                model: None,
+                cursor: None,
+                limit: Some(1),
+            },
+        })
+        .await;
+    !matches!(
+        response,
+        Err(TypedRequestError::Server { ref source, .. })
+            if app_server_session::is_managed_accounts_unsupported(source)
+    )
+}
+
 async fn maybe_probe_default_daemon_socket(codex_home: &Path) -> Option<AbsolutePathBuf> {
     let socket_path = codex_app_server_client::app_server_control_socket_path(codex_home).ok()?;
     #[cfg(windows)]
@@ -546,7 +588,7 @@ async fn maybe_probe_default_daemon_socket(codex_home: &Path) -> Option<Absolute
 async fn start_app_server(
     target: &mut AppServerTarget,
     arg0_paths: Arg0DispatchPaths,
-    config: Config,
+    mut config: Config,
     cli_kv_overrides: Vec<(String, toml::Value)>,
     loader_overrides: LoaderOverrides,
     strict_config: bool,
@@ -556,6 +598,7 @@ async fn start_app_server(
     state_db: &mut Option<StateDbHandle>,
     environment_manager: Arc<EnvironmentManager>,
     embedded_network_policy: codex_app_server_client::EmbeddedNetworkPolicy,
+    named_accounts: NamedAccounts,
 ) -> color_eyre::Result<AppServerClient> {
     let connection = if matches!(target, AppServerTarget::Embedded) {
         None
@@ -564,6 +607,27 @@ async fn start_app_server(
     };
     if let Some(connection) = connection {
         match connection {
+            Ok(app_server)
+                if named_accounts == NamedAccounts::Required
+                    && matches!(target, AppServerTarget::LocalDaemon { .. })
+                    && !local_daemon_supports_managed_accounts(&app_server).await =>
+            {
+                // Another Codex build, such as the one a desktop app starts over SSH, can own the
+                // shared socket. Named accounts and pools live in the app-server, so this TUI
+                // keeps them by serving itself instead.
+                tracing::info!(
+                    "local daemon does not support named accounts; starting embedded app server"
+                );
+                if let Err(err) = app_server.shutdown().await {
+                    tracing::debug!(%err, "failed to close the local daemon connection");
+                }
+                // Only daemon targets that allow embedded fallback were prepared for it.
+                if !target.uses_embedded_network_policy() {
+                    embedded_network_policy.activate(&mut config);
+                }
+                *target = AppServerTarget::Embedded;
+                *state_db = init_state_db_for_app_server_target(&config, target).await?;
+            }
             Ok(app_server) => return Ok(app_server),
             Err(err)
                 if matches!(
@@ -629,6 +693,7 @@ pub(crate) async fn start_app_server_for_picker(
         &mut state_db,
         environment_manager,
         embedded_network_policy,
+        NamedAccounts::Required,
     )
     .await?;
     Ok(
@@ -656,6 +721,7 @@ pub(crate) async fn start_embedded_app_server_for_picker(
         &mut state_db,
         Arc::new(EnvironmentManager::default_for_tests()),
         Default::default(),
+        NamedAccounts::Required,
     )
     .await?;
     Ok(
@@ -1206,6 +1272,7 @@ async fn run_ratatui_app(
                 &mut state_db,
                 environment_manager.clone(),
                 embedded_network_policy.clone(),
+                NamedAccounts::Required,
             ),
         )
         .await;
@@ -1785,6 +1852,7 @@ async fn run_ratatui_app(
                     &mut state_db,
                     environment_manager.clone(),
                     embedded_network_policy.clone(),
+                    NamedAccounts::Required,
                 ),
             )
             .await
@@ -1886,6 +1954,7 @@ async fn run_ratatui_app(
                     &mut state_db,
                     environment_manager.clone(),
                     embedded_network_policy.clone(),
+                    NamedAccounts::Required,
                 )
                 .await?;
                 app_server = AppServerSession::new(client, app_server_target.thread_params_mode())

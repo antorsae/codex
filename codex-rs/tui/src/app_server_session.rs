@@ -165,6 +165,7 @@ const JSONRPC_METHOD_NOT_FOUND: i64 = -32601;
 const JSONRPC_INVALID_PARAMS: i64 = -32602;
 pub(crate) const EXTERNAL_AGENT_CONFIG_IMPORT_IN_PROGRESS_MESSAGE: &str = "A previous external agent import is still running. Wait for it to finish before importing again.";
 const THREAD_SETTINGS_UPDATE_METHOD: &str = "thread/settings/update";
+const MANAGED_ACCOUNT_METHOD: &str = "account/manage";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ForkGoalContinuation {
@@ -288,6 +289,14 @@ fn is_thread_settings_update_unsupported(source: &JSONRPCErrorError) -> bool {
     source.code == JSONRPC_METHOD_NOT_FOUND
         || (source.code == JSONRPC_INVALID_REQUEST
             && source.message.contains(THREAD_SETTINGS_UPDATE_METHOD))
+}
+
+/// Servers built without named accounts reject the method while parsing the request, so they
+/// answer with an invalid request naming the method rather than with method-not-found.
+pub(crate) fn is_managed_accounts_unsupported(source: &JSONRPCErrorError) -> bool {
+    source.code == JSONRPC_METHOD_NOT_FOUND
+        || (source.code == JSONRPC_INVALID_REQUEST
+            && source.message.contains(MANAGED_ACCOUNT_METHOD))
 }
 
 /// Data collected during the TUI bootstrap phase that the main event loop
@@ -771,14 +780,23 @@ impl AppServerSession {
                     return Ok(account);
                 }
             }
+            Err(TypedRequestError::Server { source, .. })
+                if is_managed_accounts_unsupported(&source) =>
+            {
+                // A server without named accounts is an ordinary Codex server; only an explicit
+                // selection cannot be honored there.
+                if self.account_selection.is_some() {
+                    color_eyre::eyre::bail!(
+                        "The connected app-server does not support named accounts or pools, so --account and --pool cannot be used with it"
+                    );
+                }
+            }
             Err(error) if self.account_selection.is_some() => {
                 return Err(bootstrap_request_error(
                     "Named account resolution failed",
                     error,
                 ));
             }
-            Err(TypedRequestError::Server { source, .. })
-                if source.code == JSONRPC_METHOD_NOT_FOUND => {}
             Err(error) => {
                 return Err(bootstrap_request_error(
                     "Managed account resolution failed",
@@ -2787,6 +2805,48 @@ mod tests {
             };
             assert_eq!(
                 is_thread_settings_update_unsupported(&source),
+                expected,
+                "{message}"
+            );
+        }
+    }
+
+    #[test]
+    fn managed_accounts_compat_detects_servers_without_named_accounts() {
+        let cases = [
+            (JSONRPC_METHOD_NOT_FOUND, "Unknown method", true),
+            // What a stock app-server answers: the method fails request parsing.
+            (
+                JSONRPC_INVALID_REQUEST,
+                "Invalid request: unknown variant `account/manage`, expected one of `initialize`, `account/read`",
+                true,
+            ),
+            (
+                JSONRPC_INVALID_REQUEST,
+                "account/manage requires experimentalApi capability",
+                true,
+            ),
+            (
+                JSONRPC_INVALID_REQUEST,
+                "Invalid request: unknown variant `pool/manage`, expected one of `initialize`",
+                false,
+            ),
+            (
+                JSONRPC_INVALID_PARAMS,
+                "Named accounts require locally managed ChatGPT authentication with the OpenAI provider",
+                false,
+            ),
+            (JSONRPC_INVALID_PARAMS, "Unknown account: a", false),
+        ];
+
+        for (code, message, expected) in cases {
+            let source = JSONRPCErrorError {
+                code,
+                data: None,
+                message: message.to_string(),
+            };
+            assert_eq!(
+                is_managed_accounts_unsupported(&source),
                 expected,
                 "{message}"
             );
