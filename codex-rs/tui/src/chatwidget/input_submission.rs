@@ -135,6 +135,7 @@ impl ChatWidget {
         prepared_images: Option<Vec<UserInput>>,
     ) -> (bool, Option<AppCommand>) {
         self.bottom_pane.dismiss_composer_sparkle();
+        self.capacity_retry.reset();
         if self.has_misalignment_policy_violation() {
             return (false, None);
         }
@@ -414,13 +415,6 @@ impl ChatWidget {
         self.maybe_apply_ide_context(&mut items);
         crate::task_mentions::apply_task_references(&mut items, &mention_bindings, self.thread_id);
 
-        let collaboration_mode = if self.collaboration_modes_enabled() {
-            self.active_collaboration_mask
-                .as_ref()
-                .map(|_| effective_mode.clone())
-        } else {
-            None
-        };
         let submitted_image_display = (render_in_history && !local_images.is_empty())
             .then(|| Self::user_message_display_from_inputs(&items));
         let client_user_message_id = uuid::Uuid::new_v4().to_string();
@@ -438,22 +432,7 @@ impl ChatWidget {
             source,
             compare_key: Self::pending_steer_compare_key_from_items(&items),
         });
-        let service_tier = self.service_tier_update_for_core();
-        let active_permission_profile = self.config.permissions.active_permission_profile();
-        let op = AppCommand::user_turn(
-            client_user_message_id.clone(),
-            items,
-            self.config.cwd.to_path_buf(),
-            AskForApproval::from(self.config.permissions.approval_policy.value()),
-            active_permission_profile,
-            effective_mode.model().to_string(),
-            effective_mode.reasoning_effort(),
-            /*summary*/ None,
-            service_tier,
-            /*final_output_json_schema*/ None,
-            collaboration_mode,
-            /*personality*/ None,
-        );
+        let op = self.user_turn_command(client_user_message_id.clone(), items);
         let submitted_message = UserMessage {
             text,
             local_images,
@@ -555,6 +534,35 @@ impl ChatWidget {
         }
 
         (true, Some(op))
+    }
+
+    pub(super) fn user_turn_command(
+        &self,
+        client_user_message_id: String,
+        items: Vec<UserInput>,
+    ) -> AppCommand {
+        let effective_mode = self.effective_collaboration_mode();
+        let collaboration_mode = if self.collaboration_modes_enabled() {
+            self.active_collaboration_mask
+                .as_ref()
+                .map(|_| effective_mode.clone())
+        } else {
+            None
+        };
+        AppCommand::user_turn(
+            client_user_message_id,
+            items,
+            self.config.cwd.to_path_buf(),
+            AskForApproval::from(self.config.permissions.approval_policy.value()),
+            self.config.permissions.active_permission_profile(),
+            effective_mode.model().to_string(),
+            effective_mode.reasoning_effort(),
+            /*summary*/ None,
+            self.service_tier_update_for_core(),
+            /*final_output_json_schema*/ None,
+            collaboration_mode,
+            /*personality*/ None,
+        )
     }
 
     /// Restore the blocked submission draft without losing mention resolution state.

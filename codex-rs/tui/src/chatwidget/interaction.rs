@@ -58,6 +58,9 @@ impl ChatWidget {
     }
 
     pub(crate) fn handle_key_event(&mut self, key_event: KeyEvent) -> KeyEventAction {
+        if self.cancel_capacity_retry_on_key(key_event) {
+            return KeyEventAction::None;
+        }
         if self.handle_startup_submission_key(key_event) {
             return KeyEventAction::None;
         }
@@ -479,6 +482,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn handle_paste(&mut self, text: String) {
+        self.cancel_capacity_retry();
         if self.external_writer_view && !self.bottom_pane.has_active_view() {
             return;
         }

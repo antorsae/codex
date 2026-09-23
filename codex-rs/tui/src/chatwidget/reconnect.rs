@@ -9,6 +9,7 @@ impl ChatWidget {
     pub(crate) fn pause_for_disconnect(&mut self) {
         self.cancel_startup_submission();
         self.cancel_image_submission();
+        self.capacity_retry.reset();
         // The app-server transport can fail while the separate WebRTC helper
         // still sends microphone audio. Retire local media before showing offline UI.
         if matches!(
