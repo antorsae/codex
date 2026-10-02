@@ -3990,6 +3990,39 @@ async fn status_line_fast_mode_renders_on_and_off() {
 }
 
 #[tokio::test]
+async fn status_line_fast_mode_shows_ultrafast_when_the_catalog_offers_it() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
+    set_fast_mode_test_catalog(&mut chat);
+    Arc::make_mut(&mut chat.model_catalog).models[0]
+        .service_tiers
+        .push(codex_protocol::openai_models::ModelServiceTier {
+            id: codex_protocol::config_types::SERVICE_TIER_ULTRAFAST_REQUEST_VALUE.to_string(),
+            name: "Ultrafast".to_string(),
+            description: "Ultrafast processing".to_string(),
+        });
+    chat.local_settings.tui.status_line = Some(vec!["fast-mode".to_string()]);
+
+    let mut shown = Vec::new();
+    for tier in [
+        Some(codex_protocol::config_types::SERVICE_TIER_ULTRAFAST_REQUEST_VALUE),
+        Some(ServiceTier::Fast.request_value()),
+        None,
+    ] {
+        chat.set_service_tier(tier.map(str::to_string));
+        chat.refresh_status_line();
+        shown.push(status_line_text(&chat));
+    }
+    assert_eq!(
+        shown,
+        vec![
+            Some("Ultrafast on".to_string()),
+            Some("Fast on".to_string()),
+            Some("Fast off".to_string()),
+        ]
+    );
+}
+
+#[tokio::test]
 async fn status_line_fast_mode_updates_visibility_on_model_change() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
     set_fast_mode_test_catalog(&mut chat);

@@ -17,6 +17,7 @@ use codex_app_server_protocol::AskForApproval;
 use codex_config::ConfigLayerSource;
 use codex_config::os_host_name;
 use codex_protocol::config_types::ApprovalsReviewer;
+use codex_protocol::config_types::SERVICE_TIER_ULTRAFAST_REQUEST_VALUE;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::models::PermissionProfile;
 use codex_utils_sandbox_summary::summarize_permission_profile;
@@ -808,12 +809,12 @@ impl ChatWidget {
                         .find(|preset| preset.model == self.current_model())
                 })
                 .is_none_or(|preset| preset.supports_fast_mode())
-                .then(|| {
-                    if self.current_service_tier() == Some(ServiceTier::Fast.request_value()) {
+                .then(|| match self.current_service_tier() {
+                    Some(SERVICE_TIER_ULTRAFAST_REQUEST_VALUE) => "Ultrafast on".to_string(),
+                    Some(tier) if tier == ServiceTier::Fast.request_value() => {
                         "Fast on".to_string()
-                    } else {
-                        "Fast off".to_string()
                     }
+                    _ => "Fast off".to_string(),
                 }),
             StatusLineItem::Daybreak => Some(
                 if self.daybreak_enabled && !self.side_conversation_active() {

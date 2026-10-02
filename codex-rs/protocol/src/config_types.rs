@@ -536,6 +536,16 @@ pub enum ServiceTier {
 /// selected no service tier, so model catalog defaults should not apply.
 pub const SERVICE_TIER_DEFAULT_REQUEST_VALUE: &str = "default";
 
+/// Catalog id of the Ultrafast speed tier, which some plans' model catalogs advertise.
+pub const SERVICE_TIER_ULTRAFAST_REQUEST_VALUE: &str = "ultrafast";
+
+/// Speed tiers from fastest to slowest. A model without the requested tier uses the next
+/// slower one it supports instead of dropping straight to standard routing.
+pub const SERVICE_TIER_SPEED_LADDER: [&str; 2] = [
+    SERVICE_TIER_ULTRAFAST_REQUEST_VALUE,
+    ServiceTier::Fast.request_value(),
+];
+
 impl ServiceTier {
     pub const fn request_value(self) -> &'static str {
         match self {

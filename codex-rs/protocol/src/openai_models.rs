@@ -28,6 +28,7 @@ use ts_rs::TS;
 
 use crate::config_types::ReasoningSummary;
 use crate::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
+use crate::config_types::SERVICE_TIER_SPEED_LADDER;
 use crate::config_types::ServiceTier;
 use crate::config_types::Verbosity;
 use crate::protocol::MultiAgentVersion;
@@ -995,11 +996,27 @@ impl ModelInfo {
                 .any(|tier| tier.id == service_tier)
     }
 
+    /// The tier this model can use for `service_tier`: the tier itself, or for a speed tier the
+    /// model lacks, the next slower speed tier it supports.
+    pub fn supported_service_tier(&self, service_tier: &str) -> Option<String> {
+        match SERVICE_TIER_SPEED_LADDER
+            .iter()
+            .position(|tier| *tier == service_tier)
+        {
+            Some(requested) => SERVICE_TIER_SPEED_LADDER[requested..]
+                .iter()
+                .find(|tier| self.supports_service_tier(tier))
+                .map(|tier| (*tier).to_string()),
+            None => self
+                .supports_service_tier(service_tier)
+                .then(|| service_tier.to_string()),
+        }
+    }
+
     pub fn service_tier_for_request(&self, service_tier: Option<String>) -> Option<String> {
-        service_tier.filter(|service_tier| {
-            service_tier != SERVICE_TIER_DEFAULT_REQUEST_VALUE
-                && self.supports_service_tier(service_tier)
-        })
+        service_tier
+            .filter(|service_tier| service_tier != SERVICE_TIER_DEFAULT_REQUEST_VALUE)
+            .and_then(|service_tier| self.supported_service_tier(&service_tier))
     }
 }
 
@@ -1028,6 +1045,10 @@ impl ModelPreset {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "openai_models/service_tier_ladder_tests.rs"]
+mod service_tier_ladder_tests;
 
 #[cfg(test)]
 mod tests {
