@@ -274,9 +274,7 @@ pub(crate) async fn apply_spawn_agent_service_tier(
         .get_model_info(model.as_str(), &config.to_models_manager_config())
         .await;
 
-    config.service_tier = model_info
-        .supports_service_tier(service_tier.as_str())
-        .then_some(service_tier);
+    config.service_tier = model_info.supported_service_tier(service_tier.as_str());
     Ok(())
 }
 

@@ -1087,13 +1087,13 @@ pub(crate) fn get_service_tier(
     if service_tier == ServiceTier::Flex.request_value() {
         return Some(service_tier);
     }
-    if fast_mode_enabled
-        && (service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE
-            || model_info.supports_service_tier(&service_tier))
-    {
+    if !fast_mode_enabled {
+        return None;
+    }
+    if service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE {
         return Some(service_tier);
     }
-    None
+    model_info.supported_service_tier(&service_tier)
 }
 
 fn unsupported_service_tier_warning(
@@ -1104,7 +1104,7 @@ fn unsupported_service_tier_warning(
     let service_tier = configured_service_tier.filter(|service_tier| {
         fast_mode_enabled
             && *service_tier != SERVICE_TIER_DEFAULT_REQUEST_VALUE
-            && !model_info.supports_service_tier(service_tier)
+            && model_info.supported_service_tier(service_tier).is_none()
     })?;
     Some(format!(
         "Configured service tier `{service_tier}` is not advertised as supported for model `{}` and will be omitted from requests.",

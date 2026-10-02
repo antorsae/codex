@@ -6,6 +6,8 @@ use codex_core::config::AgentRoleConfig;
 use codex_core::config::Config;
 use codex_features::Feature;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
+use codex_protocol::config_types::SERVICE_TIER_ULTRAFAST_REQUEST_VALUE;
+use codex_protocol::config_types::ServiceTier;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ThreadSettingsOverrides;
@@ -393,5 +395,46 @@ async fn evicted_role_subagent_uses_root_service_tier_after_reload() -> Result<(
     reloaded_thread.shutdown_and_wait().await?;
     test.codex.shutdown_and_wait().await?;
 
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ultrafast_root_gives_subagents_fast_when_their_model_lacks_ultrafast() -> Result<()> {
+    let server = start_mock_server().await;
+    let mut builder = test_codex()
+        .with_model("gpt-5.6-sol")
+        .with_config(|config| {
+            config.service_tier = Some(SERVICE_TIER_ULTRAFAST_REQUEST_VALUE.to_string());
+            configure_priority_role(config);
+        });
+    let test = builder.build_with_auto_env(&server).await?;
+    let mut created_threads = test.thread_manager.subscribe_thread_created();
+
+    mount_root_collaboration_call(
+        &server,
+        ROOT_PROMPT,
+        SPAWN_CALL_ID,
+        json!({
+            "message": CHILD_PROMPT,
+            "task_name": "worker",
+            "fork_turns": "none",
+        }),
+    )
+    .await;
+    let child_request = mount_completed_child(&server, CHILD_PROMPT, ROOT_PROMPT).await;
+    test.submit_text_turn(ROOT_PROMPT).await?;
+    let child_thread_id = created_threads.recv().await?;
+    let child = test.thread_manager.get_thread(child_thread_id).await?;
+    wait_for_turn_complete(&child).await;
+
+    // The child's model only offers Fast, the next slower tier after Ultrafast.
+    let fast = ServiceTier::Fast.request_value();
+    assert_eq!(
+        child.config_snapshot().await.service_tier.as_deref(),
+        Some(fast)
+    );
+    assert_request_service_tier(&child_request, Some(fast));
+    child.shutdown_and_wait().await?;
+    test.codex.shutdown_and_wait().await?;
     Ok(())
 }
