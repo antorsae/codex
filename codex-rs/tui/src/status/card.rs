@@ -16,6 +16,7 @@ use codex_model_provider_info::WireApi;
 use codex_protocol::ThreadId;
 use codex_protocol::account::PlanType;
 use codex_protocol::config_types::ApprovalsReviewer;
+use codex_protocol::config_types::ReasoningMode;
 use codex_protocol::models::ActivePermissionProfile;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_READ_ONLY;
@@ -322,6 +323,10 @@ impl StatusHistoryCell {
                 .map(|effort| effort.to_string())
                 .unwrap_or_else(|| "none".to_string());
             config_entries.push(("reasoning effort", effort_value));
+            // Standard is the API default, so only Pro is called out.
+            if config.model_reasoning_mode == Some(ReasoningMode::Pro) {
+                config_entries.push(("reasoning mode", ReasoningMode::Pro.to_string()));
+            }
             if remote_connection.is_none() {
                 config_entries.push((
                     "reasoning summaries",

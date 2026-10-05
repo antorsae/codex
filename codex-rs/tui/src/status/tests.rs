@@ -2377,3 +2377,28 @@ fn reset_timestamps_follow_clock_preference() {
     00:00 on 22 Sep
     ");
 }
+
+#[test]
+fn status_model_line_calls_out_pro_reasoning_mode_only() {
+    let base = vec![
+        ("reasoning effort", "max".to_string()),
+        ("reasoning summaries", "auto".to_string()),
+    ];
+    let mut pro = base.clone();
+    pro.insert(1, ("reasoning mode", "pro".to_string()));
+
+    assert_eq!(
+        [
+            super::helpers::compose_model_display("GPT-6-Astra", &base).1,
+            super::helpers::compose_model_display("GPT-6-Astra", &pro).1,
+        ],
+        [
+            vec!["reasoning max".to_string(), "summaries auto".to_string()],
+            vec![
+                "reasoning max".to_string(),
+                "pro mode".to_string(),
+                "summaries auto".to_string(),
+            ],
+        ]
+    );
+}

@@ -23,6 +23,9 @@ pub(crate) fn compose_model_display(
     if let Some((_, effort)) = entries.iter().find(|(k, _)| *k == "reasoning effort") {
         details.push(format!("reasoning {}", effort.to_ascii_lowercase()));
     }
+    if let Some((_, mode)) = entries.iter().find(|(k, _)| *k == "reasoning mode") {
+        details.push(format!("{mode} mode"));
+    }
     if let Some((_, summary)) = entries.iter().find(|(k, _)| *k == "reasoning summaries") {
         let summary = summary.trim();
         if summary.eq_ignore_ascii_case("none") || summary.eq_ignore_ascii_case("off") {
