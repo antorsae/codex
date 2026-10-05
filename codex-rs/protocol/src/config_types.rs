@@ -71,6 +71,20 @@ pub enum ReasoningSummary {
     None,
 }
 
+/// Execution mode for reasoning (`reasoning.mode` in the Responses API). Independent of effort,
+/// which sets how much reasoning happens within the mode. The API defaults to `standard`.
+/// See https://developers.openai.com/api/docs/guides/reasoning?api-mode=responses#reasoning-mode
+#[derive(
+    Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display, JsonSchema, TS,
+)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
+pub enum ReasoningMode {
+    #[default]
+    Standard,
+    Pro,
+}
+
 /// Controls output length/detail on GPT-5 models via the Responses API.
 /// Serialized with lowercase values to match the OpenAI API.
 #[derive(

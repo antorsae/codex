@@ -7,6 +7,7 @@ use crate::bottom_pane::slash_commands::ServiceTierCommand;
 use crate::service_tier_resolution;
 use codex_features::Feature;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
+use codex_protocol::config_types::ServiceTier;
 use codex_protocol::openai_models::SPEED_TIER_FAST;
 
 impl ChatWidget {
@@ -74,7 +75,8 @@ impl ChatWidget {
 
     pub(super) fn current_model_service_tier_commands(&self) -> Vec<ServiceTierCommand> {
         let model = self.current_model();
-        self.model_catalog
+        let mut commands: Vec<ServiceTierCommand> = self
+            .model_catalog
             .try_list_models()
             .ok()
             .and_then(|models| {
@@ -93,7 +95,20 @@ impl ChatWidget {
                             .collect()
                     })
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // Flex is an API request option that model catalogs do not advertise. ChatGPT
+        // subscriptions may reject it; API-key providers accept it.
+        let flex = ServiceTier::Flex.request_value();
+        if !commands.iter().any(|command| command.id == flex) {
+            commands.push(ServiceTierCommand {
+                id: flex.to_string(),
+                name: flex.to_string(),
+                description:
+                    "Lower-cost, slower processing (API keys; subscriptions may reject it)"
+                        .to_string(),
+            });
+        }
+        commands
     }
 
     fn set_service_tier_selection(&mut self, service_tier: Option<String>) {

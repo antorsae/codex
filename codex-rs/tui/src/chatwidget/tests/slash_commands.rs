@@ -127,11 +127,21 @@ async fn service_tier_commands_lowercase_catalog_names() {
 
     assert_eq!(
         chat.current_model_service_tier_commands(),
-        vec![ServiceTierCommand {
-            id: ServiceTier::Fast.request_value().to_string(),
-            name: "fast".to_string(),
-            description: expected_description,
-        }]
+        vec![
+            ServiceTierCommand {
+                id: ServiceTier::Fast.request_value().to_string(),
+                name: "fast".to_string(),
+                description: expected_description,
+            },
+            // The fork offers Flex for every model; catalogs never advertise it.
+            ServiceTierCommand {
+                id: ServiceTier::Flex.request_value().to_string(),
+                name: "flex".to_string(),
+                description:
+                    "Lower-cost, slower processing (API keys; subscriptions may reject it)"
+                        .to_string(),
+            },
+        ]
     );
 }
 

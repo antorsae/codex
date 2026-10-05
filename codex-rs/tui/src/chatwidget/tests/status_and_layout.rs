@@ -3933,6 +3933,76 @@ async fn status_line_fast_mode_shows_ultrafast_when_the_catalog_offers_it() {
 }
 
 #[tokio::test]
+async fn status_line_shows_flex_and_reasoning_mode() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
+    set_fast_mode_test_catalog(&mut chat);
+    chat.local_settings.tui.status_line =
+        Some(vec!["fast-mode".to_string(), "reasoning-mode".to_string()]);
+
+    let mut shown = Vec::new();
+    for (tier, mode) in [
+        (None, None),
+        (
+            Some(ServiceTier::Flex.request_value()),
+            Some(codex_protocol::config_types::ReasoningMode::Pro),
+        ),
+        (
+            None,
+            Some(codex_protocol::config_types::ReasoningMode::Standard),
+        ),
+    ] {
+        chat.set_service_tier(tier.map(str::to_string));
+        if let Some(mode) = mode {
+            chat.set_reasoning_mode(mode);
+        }
+        chat.refresh_status_line();
+        shown.push(status_line_text(&chat));
+    }
+    assert_eq!(
+        shown,
+        vec![
+            Some("Fast off · Standard".to_string()),
+            Some("Flex on · Pro".to_string()),
+            Some("Fast off · Standard".to_string()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn flex_is_offered_and_pro_toggles_the_reasoning_mode() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
+    set_fast_mode_test_catalog(&mut chat);
+    assert_eq!(
+        chat.current_model_service_tier_commands()
+            .into_iter()
+            .map(|command| (command.id, command.name))
+            .collect::<Vec<_>>(),
+        vec![
+            ("priority".to_string(), "fast".to_string()),
+            ("flex".to_string(), "flex".to_string()),
+        ]
+    );
+
+    let mut requested = Vec::new();
+    for _ in 0..2 {
+        chat.dispatch_command(SlashCommand::Pro);
+        while let Ok(event) = rx.try_recv() {
+            if let AppEvent::UpdateReasoningMode(mode) = event {
+                chat.set_reasoning_mode(mode);
+                requested.push(mode);
+            }
+        }
+    }
+    assert_eq!(
+        requested,
+        vec![
+            codex_protocol::config_types::ReasoningMode::Pro,
+            codex_protocol::config_types::ReasoningMode::Standard,
+        ]
+    );
+}
+
+#[tokio::test]
 async fn status_line_fast_mode_updates_visibility_on_model_change() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
     set_fast_mode_test_catalog(&mut chat);

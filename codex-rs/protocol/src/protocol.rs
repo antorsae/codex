@@ -26,6 +26,7 @@ use crate::config_types::CollaborationMode;
 use crate::config_types::ModeKind;
 use crate::config_types::MultiAgentMode;
 use crate::config_types::Personality;
+use crate::config_types::ReasoningMode;
 use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use crate::config_types::WindowsSandboxLevel;
 use crate::dynamic_tools::DynamicToolCallOutputContentItem;
@@ -550,6 +551,9 @@ pub struct ThreadSettingsOverrides {
 
     /// Updated reasoning summary preference (honored only for reasoning-capable models).
     pub summary: Option<ReasoningSummaryConfig>,
+
+    /// Updated reasoning mode for future requests, or `None` to leave it unchanged.
+    pub reasoning_mode: Option<ReasoningMode>,
 
     /// Updated service tier preference for future turns.
     ///

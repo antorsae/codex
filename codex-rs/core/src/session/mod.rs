@@ -1902,6 +1902,9 @@ impl Session {
             }
             // Save new environment defaults for future turns. The running turn keeps its own.
             state.session_configuration = updated;
+            if let Some(mode) = updates.reasoning_mode {
+                self.services.model_client.set_reasoning_mode(Some(mode));
+            }
             if root_service_tier_changed {
                 self.services.agent_control.propagate_config_update(
                     AgentConfigUpdate::ServiceTier(

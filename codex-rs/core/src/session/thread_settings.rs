@@ -55,6 +55,7 @@ pub(super) fn prepare_update(overrides: ThreadSettingsOverrides) -> SessionSetti
         model,
         effort,
         summary,
+        reasoning_mode,
         service_tier,
         collaboration_mode,
         personality,
@@ -79,6 +80,7 @@ pub(super) fn prepare_update(overrides: ThreadSettingsOverrides) -> SessionSetti
         active_permission_profile,
         windows_sandbox_level,
         disabled_plugin_ids,
+        reasoning_mode,
         ..Default::default()
     }
 }

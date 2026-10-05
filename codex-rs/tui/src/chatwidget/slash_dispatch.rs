@@ -535,6 +535,7 @@ impl ChatWidget {
                     self.open_usage_menu();
                 }
             }
+            SlashCommand::Pro => self.toggle_reasoning_mode(),
             SlashCommand::Ide => {
                 self.handle_ide_command();
             }
@@ -1213,6 +1214,7 @@ impl ChatWidget {
             | SlashCommand::Daemon
             | SlashCommand::Pwd
             | SlashCommand::Usage
+            | SlashCommand::Pro
             | SlashCommand::DebugConfig
             | SlashCommand::Ps
             | SlashCommand::Stop

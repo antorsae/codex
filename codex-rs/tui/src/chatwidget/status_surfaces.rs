@@ -17,6 +17,7 @@ use codex_app_server_protocol::AskForApproval;
 use codex_config::ConfigLayerSource;
 use codex_config::os_host_name;
 use codex_protocol::config_types::ApprovalsReviewer;
+use codex_protocol::config_types::ReasoningMode;
 use codex_protocol::config_types::SERVICE_TIER_ULTRAFAST_REQUEST_VALUE;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::models::PermissionProfile;
@@ -814,8 +815,18 @@ impl ChatWidget {
                     Some(tier) if tier == ServiceTier::Fast.request_value() => {
                         "Fast on".to_string()
                     }
+                    Some(tier) if tier == ServiceTier::Flex.request_value() => {
+                        "Flex on".to_string()
+                    }
                     _ => "Fast off".to_string(),
                 }),
+            StatusLineItem::ReasoningMode => Some(
+                match self.config.model_reasoning_mode.unwrap_or_default() {
+                    ReasoningMode::Standard => "Standard",
+                    ReasoningMode::Pro => "Pro",
+                }
+                .to_string(),
+            ),
             StatusLineItem::RawOutput => self.raw_output_mode().then(|| "raw output".to_string()),
             StatusLineItem::ThreadName => {
                 self.thread_name.as_deref().and_then(normalize_thread_name)
@@ -869,6 +880,7 @@ impl ChatWidget {
             StatusSurfacePreviewItem::EstimatedThreadCost => StatusLineItem::EstimatedThreadCost,
             StatusSurfacePreviewItem::SessionId => StatusLineItem::SessionId,
             StatusSurfacePreviewItem::FastMode => StatusLineItem::FastMode,
+            StatusSurfacePreviewItem::ReasoningMode => StatusLineItem::ReasoningMode,
             StatusSurfacePreviewItem::RawOutput => StatusLineItem::RawOutput,
             StatusSurfacePreviewItem::WorkspaceHeadline => StatusLineItem::WorkspaceHeadline,
             StatusSurfacePreviewItem::Model => StatusLineItem::ModelName,

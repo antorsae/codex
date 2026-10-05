@@ -25,6 +25,7 @@ pub use codex_protocol::capabilities::SelectedCapabilityRoot;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::MultiAgentMode;
 use codex_protocol::config_types::Personality;
+use codex_protocol::config_types::ReasoningMode;
 use codex_protocol::config_types::ReasoningSummary;
 pub use codex_protocol::dynamic_tools::DynamicToolFunctionSpec;
 pub use codex_protocol::dynamic_tools::DynamicToolNamespaceSpec;
@@ -276,6 +277,9 @@ pub struct ThreadSettingsUpdateParams {
     /// Override the reasoning summary for subsequent turns.
     #[ts(optional = nullable)]
     pub summary: Option<ReasoningSummary>,
+    /// Override `reasoning.mode` (`standard` or `pro`) for subsequent requests.
+    #[ts(optional = nullable)]
+    pub reasoning_mode: Option<ReasoningMode>,
     /// EXPERIMENTAL - Set a pre-set collaboration mode for subsequent turns.
     ///
     /// For `collaboration_mode.settings.developer_instructions`, `null` means

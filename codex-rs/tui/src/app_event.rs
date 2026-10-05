@@ -1220,6 +1220,9 @@ pub(crate) enum AppEvent {
         voice: codex_protocol::protocol::RealtimeVoice,
     },
 
+    /// Apply and persist a `reasoning.mode` selected with `/pro`.
+    UpdateReasoningMode(codex_protocol::config_types::ReasoningMode),
+
     /// Persist the selected service tier to the appropriate config.
     PersistServiceTierSelection {
         service_tier: Option<String>,

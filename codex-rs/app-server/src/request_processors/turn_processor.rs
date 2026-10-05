@@ -911,6 +911,7 @@ impl TurnRequestProcessor {
             model,
             effort,
             summary,
+            reasoning_mode: None,
             service_tier,
             collaboration_mode,
             personality,
@@ -934,7 +935,7 @@ impl TurnRequestProcessor {
                 /*environment_selections*/ None,
             )
             .await;
-        let thread_settings = self
+        let mut thread_settings = self
             .build_thread_settings_overrides(
                 thread.as_ref(),
                 ThreadSettingsBuildParams {
@@ -954,6 +955,7 @@ impl TurnRequestProcessor {
                 },
             )
             .await?;
+        thread_settings.reasoning_mode = params.reasoning_mode;
 
         if thread_settings != codex_protocol::protocol::ThreadSettingsOverrides::default() {
             self.submit_core_op(

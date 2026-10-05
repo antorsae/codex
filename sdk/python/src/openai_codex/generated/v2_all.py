@@ -3759,6 +3759,11 @@ class ReasoningItemReasoningSummary(RootModel[SummaryTextReasoningItemReasoningS
     root: SummaryTextReasoningItemReasoningSummary
 
 
+class ReasoningMode(Enum):
+    standard = "standard"
+    pro = "pro"
+
+
 class ReasoningSummaryValue(Enum):
     auto = "auto"
     concise = "concise"
