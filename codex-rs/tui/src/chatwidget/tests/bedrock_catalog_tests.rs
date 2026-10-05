@@ -163,7 +163,13 @@ async fn bedrock_ultrafast_slash_command_selects_and_clears_tier() {
 
         chat.set_model(standard_model);
         assert_eq!(chat.current_service_tier(), None);
-        assert!(chat.current_model_service_tier_commands().is_empty());
+        assert_eq!(
+            chat.current_model_service_tier_commands()
+                .into_iter()
+                .map(|tier| tier.id)
+                .collect::<Vec<_>>(),
+            vec!["flex".to_string()]
+        );
         chat.set_model(model);
         assert_eq!(chat.current_service_tier(), Some("ultrafast"));
         chat.bottom_pane

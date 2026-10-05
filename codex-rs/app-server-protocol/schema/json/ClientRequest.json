@@ -2884,6 +2884,14 @@
         }
       ]
     },
+    "ReasoningMode": {
+      "description": "Execution mode for reasoning (`reasoning.mode` in the Responses API). Independent of effort, which sets how much reasoning happens within the mode. The API defaults to `standard`. See https://developers.openai.com/api/docs/guides/reasoning?api-mode=responses#reasoning-mode",
+      "enum": [
+        "standard",
+        "pro"
+      ],
+      "type": "string"
+    },
     "ReasoningSummary": {
       "description": "A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#reasoning-summaries",
       "oneOf": [

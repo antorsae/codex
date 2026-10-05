@@ -346,6 +346,7 @@ async fn new_config(
         model_reasoning_effort: None,
         plan_mode_reasoning_effort: None,
         model_reasoning_summary: None,
+        model_reasoning_mode: None,
         model_catalog: None,
         model_verbosity: None,
         chatgpt_base_url: auth_config

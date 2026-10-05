@@ -2530,6 +2530,35 @@ impl App {
             AppEvent::PersistRealtimeVoiceSelection { voice } => {
                 self.persist_realtime_voice(app_server, voice).await;
             }
+            AppEvent::UpdateReasoningMode(mode) => {
+                if let Some(thread_id) = self.active_thread_id {
+                    let params = ThreadSettingsUpdateParams {
+                        thread_id: thread_id.to_string(),
+                        reasoning_mode: Some(mode),
+                        ..ThreadSettingsUpdateParams::default()
+                    };
+                    self.send_thread_settings_update(app_server, params).await;
+                }
+                self.config.model_reasoning_mode = Some(mode);
+                self.chat_widget.set_reasoning_mode(mode);
+                let edits = vec![crate::config_update::replace_config_value(
+                    "model_reasoning_mode",
+                    serde_json::json!(mode.to_string()),
+                )];
+                match self
+                    .persist_model_defaults(app_server.request_handle(), edits, "reasoning mode")
+                    .await
+                {
+                    Ok(()) => self
+                        .chat_widget
+                        .add_info_message(format!("Reasoning mode set to {mode}"), /*hint*/ None),
+                    Err(err) => {
+                        tracing::error!(error = %err, "failed to persist reasoning mode");
+                        self.chat_widget
+                            .add_error_message(format!("Failed to save reasoning mode: {err}"));
+                    }
+                }
+            }
             AppEvent::PersistServiceTierSelection { service_tier } => {
                 self.refresh_status_line();
                 self.config.service_tier = service_tier.clone();

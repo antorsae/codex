@@ -233,6 +233,7 @@ impl LunaSampler {
                 effort: Some(request.reasoning_effort.clone()),
                 summary: None,
                 context: Some(ReasoningContext::AllTurns),
+                mode: None,
             }),
             store: false,
             stream: true,

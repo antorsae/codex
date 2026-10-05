@@ -85,6 +85,7 @@ use codex_protocol::ResponseItemId;
 use codex_protocol::auth::AuthMode;
 
 use codex_protocol::ThreadId;
+use codex_protocol::config_types::ReasoningMode;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use codex_protocol::config_types::Verbosity as VerbosityConfig;
 use codex_protocol::models::ResponseItem;
@@ -213,6 +214,8 @@ struct ModelClientState {
     include_timing_metrics: bool,
     beta_features_header: Option<String>,
     concurrent_reasoning_summaries_enabled: bool,
+    /// Thread-wide `reasoning.mode`; thread settings can change it between requests.
+    reasoning_mode: StdMutex<Option<ReasoningMode>>,
     include_attestation: bool,
     attestation_provider: Option<Arc<dyn AttestationProvider>>,
     disable_websockets: AtomicBool,
@@ -528,6 +531,7 @@ impl ModelClient {
                 include_timing_metrics,
                 beta_features_header,
                 concurrent_reasoning_summaries_enabled,
+                reasoning_mode: StdMutex::new(None),
                 include_attestation,
                 attestation_provider,
                 disable_websockets: AtomicBool::new(false),
@@ -551,6 +555,29 @@ impl ModelClient {
     pub(crate) fn with_executed_tool_calls(mut self, recorder: ExecutedToolCalls) -> Self {
         self.executed_tool_calls = Some(recorder);
         self
+    }
+
+    /// Starts the thread on the configured `reasoning.mode`.
+    pub(crate) fn with_reasoning_mode(self, mode: Option<ReasoningMode>) -> Self {
+        self.set_reasoning_mode(mode);
+        self
+    }
+
+    /// Changes `reasoning.mode` for later requests from every clone of this client.
+    pub(crate) fn set_reasoning_mode(&self, mode: Option<ReasoningMode>) {
+        *self
+            .state
+            .reasoning_mode
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = mode;
+    }
+
+    pub(crate) fn reasoning_mode(&self) -> Option<ReasoningMode> {
+        *self
+            .state
+            .reasoning_mode
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub(crate) fn reasoning_effort_override_enabled(&self, model_info: &ModelInfo) -> bool {
@@ -773,6 +800,7 @@ impl ModelClient {
                     effort: Some(effort),
                     summary: None,
                     context: None,
+                    mode: None,
                 }),
         };
 
@@ -884,6 +912,7 @@ impl ModelClient {
             context: model_info
                 .use_responses_lite
                 .then_some(ReasoningContext::AllTurns),
+            mode: self.reasoning_mode(),
         }
     }
 

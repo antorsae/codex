@@ -1,5 +1,6 @@
 use crate::error::ApiError;
 use codex_protocol::ResponseUsageMetadata;
+use codex_protocol::config_types::ReasoningMode;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use codex_protocol::config_types::Verbosity as VerbosityConfig;
 use codex_protocol::models::ResponseItem;
@@ -165,6 +166,8 @@ pub struct Reasoning {
     pub summary: Option<ReasoningSummaryConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<ReasoningContext>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<ReasoningMode>,
 }
 
 fn serialize_reasoning_effort<S>(

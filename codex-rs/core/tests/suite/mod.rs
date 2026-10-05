@@ -174,6 +174,7 @@ mod realtime_misalignment;
 mod realtime_sideband_endpoint;
 mod realtime_system_proxy;
 mod reasoning_effort_override;
+mod reasoning_mode;
 mod remote_env;
 mod remote_models;
 mod request_compression;

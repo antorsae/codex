@@ -67,6 +67,7 @@ export type { RealtimeVoicesList } from "./RealtimeVoicesList";
 export type { ReasoningEffort } from "./ReasoningEffort";
 export type { ReasoningItemContent } from "./ReasoningItemContent";
 export type { ReasoningItemReasoningSummary } from "./ReasoningItemReasoningSummary";
+export type { ReasoningMode } from "./ReasoningMode";
 export type { ReasoningSummary } from "./ReasoningSummary";
 export type { RequestId } from "./RequestId";
 export type { Resource } from "./Resource";

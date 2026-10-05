@@ -32,6 +32,7 @@ use codex_model_provider::SharedModelProvider;
 use codex_prompts::render_model_instructions;
 use codex_protocol::SessionId;
 use codex_protocol::capabilities::SelectedCapabilityRoot;
+use codex_protocol::config_types::ReasoningMode;
 use codex_protocol::config_types::ShellEnvironmentPolicy;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::models::ProfileWorkspaceRoot;
@@ -618,6 +619,7 @@ pub(crate) struct SessionSettingsUpdate {
     pub(crate) app_server_client_name: Option<String>,
     pub(crate) app_server_client_version: Option<String>,
     pub(crate) disabled_plugin_ids: Option<Vec<String>>,
+    pub(crate) reasoning_mode: Option<ReasoningMode>,
 }
 
 pub(crate) struct AppServerClientMetadata {
@@ -1786,6 +1788,7 @@ impl Session {
                     extensions.model_request_contributors().to_vec(),
                 )
                 .with_executed_tool_calls(executed_tool_calls.clone())
+                .with_reasoning_mode(config.model_reasoning_mode)
                 .with_restored_history(matches!(
                     &initial_history,
                     InitialHistory::Resumed(_) | InitialHistory::Forked(_)
