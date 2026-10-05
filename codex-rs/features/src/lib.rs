@@ -992,7 +992,9 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::DaemonAutoStart,
         key: "daemon_auto_start",
         stage: Stage::Stable,
-        default_enabled: true,
+        // An auto-started daemon runs a separately installed managed package, which a bare
+        // binary without a complete local package cannot install, so it is opt-in here.
+        default_enabled: false,
     },
     FeatureSpec {
         id: Feature::TranscriptV2,
